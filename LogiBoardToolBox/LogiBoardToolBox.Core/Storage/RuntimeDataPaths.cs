@@ -1,6 +1,6 @@
 namespace LogiBoardToolBox.Core.Storage;
 
-/// <summary>One-time, non-destructive migration of the former product's local settings and backups.</summary>
+/// <summary>One-time, non-destructive migration of the former product's onboard settings and backups.</summary>
 public static class RuntimeDataPaths
 {
     public const string ProductName = "LogiBoardToolBox";
@@ -11,18 +11,23 @@ public static class RuntimeDataPaths
         var parent = Path.GetFullPath(localApplicationData);
         var current = Path.Combine(parent, ProductName);
         var legacy = Path.Combine(parent, LegacyProductName);
-        if (Directory.Exists(current) || !Directory.Exists(legacy)) return current;
+        var currentOnboard = Path.Combine(current, "Onboard");
+        var legacyOnboard = Path.Combine(legacy, "Onboard");
+        // The configuration framework can create the product root before this view model.
+        // Only an existing onboard library means the migration has already been handled.
+        if (Directory.Exists(currentOnboard) || !Directory.Exists(legacyOnboard)) return current;
         var staging = Path.Combine(parent, ProductName + ".migrating-" + Guid.NewGuid().ToString("N"));
         try
         {
-            CopyDirectory(legacy, staging);
-            if (!Directory.Exists(current)) Directory.Move(staging, current);
+            CopyDirectory(legacyOnboard, staging);
+            Directory.CreateDirectory(current);
+            if (!Directory.Exists(currentOnboard)) Directory.Move(staging, currentOnboard);
             return current;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             // Original data is never moved or deleted. A failed migration must not hide it.
-            return Directory.Exists(current) ? current : legacy;
+            return Directory.Exists(currentOnboard) ? current : legacy;
         }
         finally
         {

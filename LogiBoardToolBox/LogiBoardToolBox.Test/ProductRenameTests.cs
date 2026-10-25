@@ -27,6 +27,24 @@ public class ProductRenameTests
     }
 
     [Test]
+    public void FrameworkCreatedProductRootDoesNotPreventOnboardDataMigration()
+    {
+        using var scratch = new ScratchDirectory();
+        var old = Path.Combine(scratch.Path, RuntimeDataPaths.LegacyProductName, "Onboard");
+        var currentRoot = Path.Combine(scratch.Path, RuntimeDataPaths.ProductName);
+        var framework = Path.Combine(currentRoot, "CrossVersion");
+        Directory.CreateDirectory(old);
+        Directory.CreateDirectory(framework);
+        File.WriteAllText(Path.Combine(old, "macros.json"), "recorded macro library");
+        File.WriteAllText(Path.Combine(framework, "settings.json"), "current framework settings");
+
+        Assert.Equal(currentRoot, RuntimeDataPaths.GetProductDirectory(scratch.Path));
+        Assert.Equal("recorded macro library", File.ReadAllText(Path.Combine(currentRoot, "Onboard", "macros.json")));
+        Assert.Equal("current framework settings", File.ReadAllText(Path.Combine(framework, "settings.json")));
+        Assert.Equal("recorded macro library", File.ReadAllText(Path.Combine(old, "macros.json")));
+    }
+
+    [Test]
     public async Task LegacyBackupHeadersRemainLoadableAndRestorableAfterTheProductRename()
     {
         using var scratch = new ScratchDirectory();
