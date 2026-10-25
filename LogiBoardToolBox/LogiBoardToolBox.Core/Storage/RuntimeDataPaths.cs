@@ -1,0 +1,51 @@
+namespace LogiBoardToolBox.Core.Storage;
+
+/// <summary>One-time, non-destructive migration of the former product's local settings and backups.</summary>
+public static class RuntimeDataPaths
+{
+    public const string ProductName = "LogiBoardToolBox";
+    public const string LegacyProductName = "LogiBordToolBox";
+
+    public static string GetProductDirectory(string localApplicationData)
+    {
+        var parent = Path.GetFullPath(localApplicationData);
+        var current = Path.Combine(parent, ProductName);
+        var legacy = Path.Combine(parent, LegacyProductName);
+        if (Directory.Exists(current) || !Directory.Exists(legacy)) return current;
+        var staging = Path.Combine(parent, ProductName + ".migrating-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            CopyDirectory(legacy, staging);
+            if (!Directory.Exists(current)) Directory.Move(staging, current);
+            return current;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Original data is never moved or deleted. A failed migration must not hide it.
+            return Directory.Exists(current) ? current : legacy;
+        }
+        finally
+        {
+            if (Directory.Exists(staging) && Path.GetDirectoryName(Path.GetFullPath(staging)) == parent
+                && Path.GetFileName(staging).StartsWith(ProductName + ".migrating-", StringComparison.Ordinal))
+            {
+                try { Directory.Delete(staging, recursive: true); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            }
+        }
+    }
+
+    private static void CopyDirectory(string source, string target)
+    {
+        if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("迁移不会跟随数据目录链接。");
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) throw new IOException("迁移不会跟随数据文件链接。");
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)), overwrite: false);
+        }
+        foreach (var directory in Directory.EnumerateDirectories(source))
+            CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
+    }
+}

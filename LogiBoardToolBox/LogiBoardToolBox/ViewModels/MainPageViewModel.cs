@@ -1,0 +1,369 @@
+using System.Collections.ObjectModel;
+using System.Text.Json;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using LogiBoardToolBox.Core.HidPlusPlus;
+using LogiBoardToolBox.Core.Macros;
+using LogiBoardToolBox.Core.Onboard;
+using LogiBoardToolBox.Core.Windows;
+
+namespace LogiBoardToolBox.ViewModels;
+
+public partial class MainPageViewModel : ViewModelBase, IDisposable
+{
+    private HidPlusPlusClient? client;
+    private OnboardMemory? memory;
+    private MemorySnapshot? snapshot;
+    private string? snapshotDeviceIdentity;
+    private bool initialized;
+    private readonly string dataDirectory = Utilities.UiVerification.IsRequested ? Utilities.UiVerification.SettingsDirectory : Path.Combine(Core.Storage.RuntimeDataPaths.GetProductDirectory(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)), "Onboard");
+    public string BackupDirectory => Path.Combine(dataDirectory, "Backups");
+    public ObservableCollection<LogitechDevice> Devices { get; } = [];
+    public ObservableCollection<MouseProfile> Profiles { get; } = [];
+    public ObservableCollection<DpiStageEditor> DpiStages { get; } = [];
+    public ObservableCollection<ButtonBindingEditor> StandardBindings { get; } = [];
+    public ObservableCollection<ButtonBindingEditor> ShiftBindings { get; } = [];
+    public IEnumerable<ButtonBindingEditor> VisibleBindings => ShowGShift ? ShiftBindings : StandardBindings;
+    public IEnumerable<ButtonBindingEditor> AllBindings => StandardBindings.Concat(ShiftBindings);
+    public ObservableCollection<MacroEditor> Macros { get; } = [];
+    public ObservableCollection<LightingEditor> Lighting { get; } = [];
+    public ObservableCollection<string> Activity { get; } = [];
+    public IReadOnlyList<int> DpiIndices { get; } = [1, 2, 3, 4, 5];
+    public ObservableCollection<EditorChoice> ReportRates { get; } = [new("125", "125 Hz"), new("250", "250 Hz"), new("500", "500 Hz"), new("1000", "1000 Hz")];
+    [ObservableProperty] public partial LogitechDevice? SelectedDevice { get; set; }
+    [ObservableProperty] public partial MouseProfile? SelectedProfile { get; set; }
+    [ObservableProperty] public partial MacroEditor? SelectedMacro { get; set; }
+    [ObservableProperty] public partial ButtonBindingEditor? MacroTarget { get; set; }
+    [ObservableProperty] public partial bool IsBusy { get; set; }
+    [ObservableProperty] public partial bool ShowGShift { get; set; }
+    [ObservableProperty] public partial bool AllowExperimental { get; set; }
+    [ObservableProperty] public partial string ProfileName { get; set; } = "";
+    [ObservableProperty] public partial bool ProfileEnabled { get; set; }
+    [ObservableProperty] public partial int DefaultDpi { get; set; } = 1;
+    [ObservableProperty] public partial int ShiftDpi { get; set; } = 1;
+    [ObservableProperty] public partial EditorChoice SelectedRate { get; set; }
+    [ObservableProperty] public partial string PowerSaveSeconds { get; set; } = "60";
+    [ObservableProperty] public partial string PowerOffSeconds { get; set; } = "300";
+    [ObservableProperty] public partial string Status { get; set; } = "连接鼠标后扫描设备。选择板载配置后，有效修改会自动保存到鼠标。";
+    [ObservableProperty] public partial string StatusTitle { get; set; } = "开始使用";
+    [ObservableProperty] public partial bool HasError { get; set; }
+    [ObservableProperty] public partial string DeviceSummary { get; set; } = "尚未读取设备";
+    [ObservableProperty] public partial string ModeSummary { get; set; } = "等待连接";
+    [ObservableProperty] public partial string CapabilityNote { get; set; } = "设备能力会在读取后显示。";
+    [ObservableProperty] public partial string MacroPreview { get; set; } = "编译后显示实际板载字节码和空间占用。";
+    [ObservableProperty] public partial string LastBackupPath { get; set; } = "";
+    public bool IsIdle => !IsBusy;
+    public bool HasSnapshot => snapshot is not null;
+    public bool OnboardMode => snapshot?.Mode == 1;
+    public string OnboardModeText => OnboardMode ? "开启" : "关闭";
+    public bool CanEdit => !IsBusy && SelectedProfile is not null && snapshot?.Capabilities.CanEditProfiles == true;
+    public bool CanEditPerformance => CanEdit && snapshot?.Capabilities.CanEditPerformance == true;
+    public bool CanEditLighting => CanEdit && HasRgbLighting && snapshot?.Capabilities.CanEditLighting == true;
+    public bool HasGShift => snapshot?.Capabilities.HasGShift == true;
+    public bool IsExperimental => snapshot?.Capabilities.IsExperimental == true;
+    public bool CanWrite => CanEdit && (!IsExperimental || AllowExperimental);
+    public bool CanChangeMode => IsIdle && HasSnapshot;
+    public MainPageViewModel()
+    {
+        InitializeMacroTimeline();
+        InitializeLightsync();
+        SelectedRate = ReportRates[^1]; Macros.Add(new()); SelectedMacro = Macros[0];
+        InitializeAssignmentPalette();
+        InitializeImmediateSave();
+    }
+    public async Task InitializeAsync()
+    {
+        if (initialized) return;
+        initialized = true;
+        ReadSensitivityPresets();
+        ReadAnimationLibrary();
+        var path = Path.Combine(dataDirectory, "macros.json");
+        if (File.Exists(path)) await RunAsync(async () =>
+        {
+            var saved = JsonSerializer.Deserialize<List<SavedMacro>>(await File.ReadAllTextAsync(path)) ?? [];
+            Macros.Clear();
+            foreach (var item in saved) Macros.Add(new()
+            {
+                Name = item.Name,
+                Script = item.Script,
+                HoldScript = item.HoldScript,
+                ReleaseScript = item.ReleaseScript,
+                UseStandardDelay = item.UseStandardDelay,
+                StandardDelay = item.StandardDelay,
+                ShowUpDown = item.ShowUpDown,
+                Color = item.Color,
+                SelectedRepeat = MacroEditor.RepeatChoices.FirstOrDefault(c => c.Id == ((int)item.Repeat).ToString()) ?? MacroEditor.RepeatChoices[0]
+            });
+            SelectedMacro = Macros.FirstOrDefault();
+        });
+        await ScanAsync();
+        if (SelectedDevice is not null && !HasSnapshot) await ReadAsync();
+    }
+    partial void OnIsBusyChanged(bool value) => UpdateCapabilities();
+    partial void OnAllowExperimentalChanged(bool value) => OnPropertyChanged(nameof(CanWrite));
+    partial void OnShowGShiftChanged(bool value)
+    {
+        OnPropertyChanged(nameof(VisibleBindings));
+        SelectedButton = VisibleBindings.FirstOrDefault(b => b.Index == SelectedButton?.Index) ?? VisibleBindings.FirstOrDefault();
+    }
+    partial void OnSelectedDeviceChanged(LogitechDevice? value)
+    {
+        if (snapshotDeviceIdentity == value?.Identity) return;
+        using var saveScope = PauseImmediateSave();
+        // Clearing the previous software profile must not recreate its draft under slot 1
+        // and restore those old-model buttons when the new mouse also opens slot 1.
+        refreshingProfiles = true;
+        try
+        {
+        client?.Dispose(); client = null; memory = null; snapshot = null; snapshotDeviceIdentity = null;
+        hostMode = null; performance = null; sensor = null;
+        advanced = null; lightingCapabilities = null; OnPropertyChanged(nameof(AdvancedState));
+        HasLightforce = false; HasHeroCalibration = false; HasStartupEffect = false;
+        softwareWorkspaceDraft = null; softwareWorkspaceLighting = null;
+        drafts.Clear(); stagedLights.Clear();
+        Configurations.Clear(); SelectedConfiguration = null;
+        Profiles.Clear(); SelectedProfile = null; AllowExperimental = false;
+        StandardBindings.Clear(); ShiftBindings.Clear(); SelectedButton = null; ShowGShift = false; IsSideView = false;
+        NotifyDeviceModel();
+        DeviceSummary = "请读取此设备的板载配置"; ModeSummary = "等待读取"; UpdateCapabilities();
+        }
+        finally { refreshingProfiles = false; }
+    }
+    partial void OnSelectedProfileChanged(MouseProfile? value)
+    {
+        using var saveScope = PauseImmediateSave();
+        StandardBindings.Clear(); ShiftBindings.Clear(); DpiStages.Clear(); Lighting.Clear();
+        if (value is not null && snapshot is not null)
+        {
+            ProfileName = value.Name; ProfileEnabled = value.Enabled;
+            DefaultDpi = value.DefaultDpiIndex + 1; ShiftDpi = value.ShiftDpiIndex + 1;
+            PowerSaveSeconds = value.PowerSaveTimeout.ToString(); PowerOffSeconds = value.PowerOffTimeout.ToString();
+            LoadPerformance(value);
+            for (var i = 0; i < snapshot.Capabilities.AssignableButtonCount; i++)
+            {
+                var name = DeviceModel.ButtonName(i);
+                StandardBindings.Add(new(i, false, name, value.GetBinding(i)));
+                if (snapshot.Capabilities.HasGShift) ShiftBindings.Add(new(i, true, name, value.GetBinding(i, true)));
+            }
+            MatchStoredMacros();
+            for (var i = 0; i < 4; i++) Lighting.Add(new(i, value.GetLighting(i)));
+            LoadLightsync(value);
+            RestoreDraft(value.Sector);
+            MacroTarget = StandardBindings.Count > 3 ? StandardBindings[3] : StandardBindings.FirstOrDefault();
+        }
+        OnPropertyChanged(nameof(VisibleBindings)); OnPropertyChanged(nameof(AllBindings)); UpdateCapabilities();
+        RefreshAssignmentPalette();
+        SelectedButton = VisibleBindings.FirstOrDefault();
+    }
+    private void MatchStoredMacros()
+    {
+        if (snapshot is null) return;
+        var known = new List<(string Name, byte[] Bytes)>();
+        foreach (var macro in Macros)
+        {
+            try { known.Add((macro.Name, macro.Compile().Bytes)); }
+            catch (Exception error) when (error is FormatException or NotSupportedException or ArgumentException or OverflowException) { }
+        }
+        foreach (var row in AllBindings.Where(row => ButtonBinding.IsMacro(row.Original)))
+        {
+            try
+            {
+                var bytes = MacroAllocator.ReadMacroBytes(snapshot, new(ButtonBinding.MacroSector(row.Original), ButtonBinding.MacroOffset(row.Original)));
+                var matches = known.Where(m => m.Bytes.SequenceEqual(bytes)).ToArray();
+                if (matches.Length != 1 || Macros.Count(m => m.Name == matches[0].Name) != 1) continue;
+                row.SelectedAction = ButtonBindingEditor.ActionChoices.First(c => c.Id == "macro");
+                row.Value = matches[0].Name; row.FriendlyName = matches[0].Name;
+            }
+            catch (InvalidDataException) { /* Preserve unknown firmware bytecode as its original binding. */ }
+        }
+    }
+    private void UpdateCapabilities()
+    {
+        foreach (var name in new[] { nameof(IsIdle), nameof(HasSnapshot), nameof(OnboardMode), nameof(CanEdit), nameof(CanEditPerformance), nameof(CanEditLighting), nameof(HasGShift), nameof(IsExperimental), nameof(CanWrite), nameof(CanApplyPerformance), nameof(CanChangeDevice), nameof(CanStartSoftware) }) OnPropertyChanged(name);
+        OnPropertyChanged(nameof(OnboardModeText));
+        OnPropertyChanged(nameof(CanChangeMode));
+    }
+    private void Log(string text)
+    {
+        Console.WriteLine(text); Activity.Insert(0, $"{DateTime.Now:HH:mm:ss}  {text}");
+        while (Activity.Count > 120) Activity.RemoveAt(Activity.Count - 1);
+    }
+    public void ShowError(Exception ex)
+    {
+        HasError = true; StatusTitle = "操作未完成"; Status = ex.Message; Log(ex.Message);
+    }
+    public async Task RunAsync(Func<Task> operation)
+    {
+        if (IsBusy) return;
+        IsBusy = true; HasError = false;
+        try { await operation(); } catch (Exception ex) { ShowError(ex); } finally { IsBusy = false; }
+    }
+    [RelayCommand]
+    private async Task ScanAsync()
+    {
+        if (!CanChangeDevice) return;
+        try { await FlushImmediateSaveAsync(); }
+        catch (Exception error) { ShowError(error); return; }
+        await RunAsync(async () =>
+    {
+        StatusTitle = "扫描设备"; Status = "正在枚举罗技 HID++ 接口，请保持鼠标唤醒…";
+        var devices = await Task.Run(() => LogitechDiscovery.FindAsync());
+        var old = SelectedDevice?.Identity;
+        Devices.Clear(); foreach (var device in devices) Devices.Add(device);
+        SelectedDevice = Devices.FirstOrDefault(d => d.Identity == old) ?? Devices.FirstOrDefault();
+        StatusTitle = devices.Count == 0 ? "未发现鼠标" : "设备已连接";
+        Status = devices.Count == 0 ? "请检查接收器或 USB 连接，移动鼠标后重新扫描。" : "选择设备并点击“读取板载”。";
+        Log($"发现 {devices.Count} 个支持板载配置的设备。");
+        if (SelectedDevice is not null) await ReadCoreAsync();
+        });
+    }
+    [RelayCommand] private async Task ReadAsync() { await FlushImmediateSaveAsync(); await RunAsync(ReadCoreAsync); }
+    public async Task SetDeviceModeAsync(bool onboard) => await RunAsync(async () =>
+    {
+        if (memory is null || snapshot is null) throw new InvalidOperationException("请先读取设备。");
+        await StopRuntimeCoreAsync();
+        var result = await memory.SetModeAsync(onboard);
+        snapshot.Mode = result.Mode; snapshot.ActiveSector = result.ActiveSector;
+        ModeSummary = result.Mode == 1 ? $"板载模式 · 活动配置 {result.ActiveSector}" : "主机模式 · 当前由软件控制";
+        StatusTitle = "鼠标模式已切换"; Status = ModeSummary; UpdateCapabilities();
+    });
+    private async Task ReadCoreAsync()
+    {
+        using var saveScope = PauseImmediateSave();
+        await StopRuntimeCoreAsync();
+        var device = SelectedDevice ?? throw new InvalidOperationException("请先选择设备。");
+        client?.Dispose(); client = LogitechDiscovery.Open(device);
+        hostMode = new(client);
+        memory = new(client, device.Identity, device.Name); StatusTitle = "读取板载存储";
+        var read = await memory.ReadAsync(new Progress<string>(message => Status = message));
+        snapshot = read; snapshotDeviceIdentity = device.Identity;
+        var caps = read.Capabilities;
+        DeviceSummary = caps.Summary;
+        ModeSummary = read.Mode == 1 ? $"板载模式 · 活动配置 {read.ActiveSector}" : "主机模式 · 当前由软件控制";
+        CapabilityNote = caps.IsExperimental
+            ? "此鼠标使用格式 10。匹配已识别布局后，支持按键、五档双轴 DPI、双连接回报率及格式 1 宏的实验性板载写入。选择板载配置后自动保存、备份并读回校验。灯效和 G-Shift 以设备能力为准。"
+            : caps.CanEditProfiles ? "支持板载 DPI、回报率和按键；G-Shift、灯效、宏空间以此鼠标的实际能力为准。选择板载配置后修改自动保存，逐扇区读回校验。Lua、应用识别及音画同步需要主机。"
+            : "此板载布局尚未适配，当前仅提供读取与原始备份。";
+        await ReadPerformanceAsync();
+        await ReadDeviceStatusAsync();
+        await ReadAdvancedSettingsAsync();
+        await ReadLightingCapabilitiesAsync();
+        var oldSector = read.Mode == 1 ? read.ActiveSector : SelectedProfile?.Sector ?? (ushort)1;
+        refreshingProfiles = true; drafts.Clear();
+        Profiles.Clear(); foreach (var profile in read.GetProfiles()) Profiles.Add(profile);
+        SelectedProfile = Profiles.FirstOrDefault(p => p.Sector == oldSector) ?? Profiles.FirstOrDefault();
+        refreshingProfiles = false;
+        RebuildConfigurations();
+        StatusTitle = "读取完成";
+        Status = $"已读取 {read.Sectors.Count} 个扇区；{read.ReadErrors.Count} 个读取错误。选择板载配置后，有效修改会自动保存并读回校验。";
+        Log($"{device.Name} · {caps.Summary}"); UpdateCapabilities();
+    }
+    public MemoryWritePlan PrepareWrite()
+    {
+        if (snapshot is null || SelectedProfile is null || memory is null) throw new InvalidOperationException("请先读取板载存储。");
+        var profile = snapshot.GetProfiles().Single(p => p.Sector == SelectedProfile.Sector).Copy(); profile.Name = ProfileName.Trim(); profile.Enabled = ProfileEnabled;
+        if (snapshot.Capabilities.CanEditPerformance)
+        {
+            ApplyPerformanceToProfile(profile);
+        }
+        var assignments = new List<MacroAssignment>();
+        foreach (var row in AllBindings)
+        {
+            try
+            {
+                profile.SetBinding(row.Index, row.GShift, row.BuildBinding());
+                if (row.SelectedAction.Id != "macro") continue;
+                var matches = Macros.Where(m => m.Name == row.Value.Trim()).ToArray();
+                if (matches.Length != 1) throw new FormatException("宏名称不存在或重名，请检查宏库。");
+                assignments.Add(new(row.Index, row.GShift, matches[0].Compile()));
+            }
+            catch (Exception ex) { throw new FormatException($"{row}：{ex.Message}", ex); }
+        }
+        ApplyLightsyncToProfile(profile);
+        return MemoryWritePlan.Create(snapshot, profile, assignments, AllowExperimental);
+    }
+    public async Task CommitAsync(MemoryWritePlan plan) => await RunAsync(async () =>
+    {
+        await StopRuntimeCoreAsync();
+        if (memory is null) throw new InvalidOperationException("设备已断开，请重新读取。");
+        StatusTitle = "写入板载配置";
+        var result = await memory.CommitAsync(plan, BackupDirectory, new Progress<string>(message => Status = message));
+        LastBackupPath = result.BackupPath; stagedLights.Remove(SelectedProfile!.Sector); await ReadCoreAsync(); StatusTitle = "板载写入完成";
+        Status = $"已写入并读回验证 {result.SectorsWritten} 个扇区，已启用板载模式。原始备份：{result.BackupPath}"; Log(Status);
+    });
+    public async Task ExportBackupAsync(string path) => await RunAsync(async () =>
+    {
+        if (memory is null) throw new InvalidOperationException("请先读取设备。");
+        var current = await memory.ReadAsync(new Progress<string>(message => Status = message));
+        await OnboardMemory.SaveBackupAsync(current, path);
+        LastBackupPath = path; StatusTitle = "备份完成"; Status = path; Log("备份已导出：" + path);
+    });
+    public async Task<MemoryWritePlan> PrepareRestoreAsync(string path)
+    {
+        if (memory is null || snapshot is null) throw new InvalidOperationException("请先读取设备。");
+        var backup = await OnboardMemory.LoadBackupAsync(path);
+        var current = await memory.ReadAsync(new Progress<string>(message => Status = message));
+        return MemoryWritePlan.Restore(current, backup, AllowExperimental);
+    }
+    [RelayCommand]
+    private void AddMacro()
+    {
+        var index = 1; while (Macros.Any(m => m.Name == $"新宏 {index}")) index++;
+        var macro = new MacroEditor { Name = $"新宏 {index}", Script = "tap A\ndelay 50\ntap B" };
+        Macros.Add(macro); SelectedMacro = macro;
+        RefreshAssignmentPalette();
+    }
+    [RelayCommand]
+    private void RemoveMacro()
+    {
+        if (SelectedMacro is not null) Macros.Remove(SelectedMacro); SelectedMacro = Macros.FirstOrDefault();
+        RefreshAssignmentPalette();
+    }
+    [RelayCommand]
+    private void CompileMacro()
+    {
+        try
+        {
+            var macro = SelectedMacro ?? throw new InvalidOperationException("请先选择宏。");
+            var program = macro.CompileProgram();
+            try
+            {
+                var compiled = program.ToOnboard();
+                MacroPreview = $"软件执行：{program.InstructionCount} 条步骤，通过检查。\n板载编译：{compiled.Length} 字节\n{Convert.ToHexString(compiled.Bytes)}\n长宏自动分配跳转链。";
+            }
+            catch (NotSupportedException ex) { MacroPreview = $"软件执行：{program.InstructionCount} 条步骤，通过检查。\n板载限制：{ex.Message}"; }
+        }
+        catch (Exception ex) { MacroPreview = ex.Message; ShowError(ex); }
+    }
+    [RelayCommand]
+    private void BindMacro()
+    {
+        try
+        {
+            var target = MacroTarget ?? throw new InvalidOperationException("请先选择目标按键。");
+            var macro = SelectedMacro ?? throw new InvalidOperationException("请先选择宏。");
+            _ = macro.CompileProgram();
+            if (string.IsNullOrWhiteSpace(macro.Name)) throw new FormatException("宏名称不能为空。");
+            target.SelectedAction = ButtonBindingEditor.ActionChoices.Single(c => c.Id == "macro"); target.Value = macro.Name;
+            StatusTitle = "宏已分配"; Status = $"{macro.Name} → {target}。可启动软件宏，或预览板载写入兼容性。";
+        }
+        catch (Exception ex) { ShowError(ex); }
+    }
+    [RelayCommand]
+    private async Task SaveMacrosAsync() => await RunAsync(async () =>
+    {
+        if (Macros.Any(m => string.IsNullOrWhiteSpace(m.Name)) || Macros.GroupBy(m => m.Name).Any(g => g.Count() > 1)) throw new FormatException("宏名称不能为空或重名。");
+        foreach (var macro in Macros)
+        {
+            _ = macro.CompileProgram();
+        }
+        Directory.CreateDirectory(dataDirectory);
+        var path = Path.Combine(dataDirectory, "macros.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(Macros.Select(m => new SavedMacro(m.Name, m.Script, m.Repeat, m.HoldScript, m.ReleaseScript, m.UseStandardDelay, m.StandardDelay, m.ShowUpDown, m.Color)), new JsonSerializerOptions { WriteIndented = true }));
+        StatusTitle = "宏库已保存"; Status = path;
+        RefreshAssignmentPalette();
+        RequestImmediateSave();
+    });
+    private sealed record SavedMacro(string Name, string Script, MacroRepeat Repeat, string HoldScript = "", string ReleaseScript = "", bool UseStandardDelay = false, string StandardDelay = "50", bool ShowUpDown = true, string Color = "#00A5DB");
+    public void Dispose() { client?.Dispose(); }
+}

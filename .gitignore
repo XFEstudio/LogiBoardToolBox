@@ -1,0 +1,15 @@
+.vs/
+**/bin/
+**/obj/
+artifacts/
+*.user
+*.suo
+XfeTestArtifacts/
+
+work/
+**/AppPackages/
+*.log
+*.pfx
+*.key
+.env
+.env.*

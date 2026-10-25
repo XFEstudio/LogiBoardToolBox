@@ -1,0 +1,407 @@
+[
+  {
+    "Id": "G502XPlus",
+    "GHubModelId": "g502x_plus",
+    "SlotPrefix": "g502x-plus",
+    "DisplayName": "G502 X PLUS",
+    "Aliases": [
+      "G502 X PLUS"
+    ],
+    "ProductIds": [
+      16537,
+      49301
+    ],
+    "ImageAsset": "/Assets/Devices/G502XPlus/front_black.png",
+    "Layout": "G502X",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "DPI Shift · G5",
+      "前进 · G6",
+      "滚轮左倾 · G7",
+      "滚轮右倾 · G8",
+      "配置切换 · G9",
+      "DPI 增加 · G10",
+      "DPI 减少 · G11",
+      "滚轮向下",
+      "滚轮向上"
+    ],
+    "LightingZoneCount": 8,
+    "ImageAspect": 0.5151851851851852
+  },
+  {
+    "Id": "GPW",
+    "GHubModelId": "pro_wireless_mouse",
+    "SlotPrefix": "prowirelessmouse",
+    "DisplayName": "PRO WIRELESS",
+    "Aliases": [
+      "G PRO Wireless",
+      "PRO WIRELESS",
+      "GPW",
+      "Pro Wireless Mouse"
+    ],
+    "ProductIds": [
+      49288,
+      16505
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/GPW.png",
+    "ImageAspect": 0.516,
+    "Layout": "Ambidextrous",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "左侧后退 · G4",
+      "左侧前进 · G5",
+      "底部 DPI · G6",
+      "右侧后退 · G7",
+      "右侧前进 · G8"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "Superlight",
+    "GHubModelId": "pro_x_wireless_mouse",
+    "SlotPrefix": "proxwirelessmouse",
+    "DisplayName": "PRO X SUPERLIGHT",
+    "Aliases": [
+      "PRO X SUPERLIGHT",
+      "G PRO X SUPERLIGHT",
+      "GPW 2",
+      "GPW2",
+      "PRO X SUPERLIGHT Wireless Mouse"
+    ],
+    "ProductIds": [
+      49300,
+      16531
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/Superlight.png",
+    "ImageAspect": 0.504,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5"
+    ],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G305",
+    "GHubModelId": "g305",
+    "SlotPrefix": "g305",
+    "DisplayName": "G305",
+    "Aliases": [
+      "G305",
+      "G304",
+      "G304 LIGHTSPEED",
+      "G305 LIGHTSPEED",
+      "G305 Lightspeed Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      16500
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G305.png",
+    "ImageAspect": 0.556,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5",
+      "DPI 循环 · G6"
+    ],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G502Hero",
+    "GHubModelId": "g502_hero",
+    "SlotPrefix": "g502hero",
+    "DisplayName": "G502 HERO",
+    "Aliases": [
+      "G502 HERO",
+      "G502 Hero Gaming Mouse"
+    ],
+    "ProductIds": [
+      49291
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G502Hero.png",
+    "ImageAspect": 0.516,
+    "Layout": "Extended",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "按键 G4",
+      "按键 G5",
+      "按键 G6",
+      "按键 G7",
+      "按键 G8",
+      "按键 G9",
+      "按键 G10",
+      "按键 G11"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G502Wireless",
+    "GHubModelId": "g502_wireless",
+    "SlotPrefix": "g502wireless",
+    "DisplayName": "G502 LIGHTSPEED",
+    "Aliases": [
+      "G502 LIGHTSPEED",
+      "G502 HERO WIRELESS",
+      "G502 LIGHTSPEED Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      49293,
+      16511
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G502Wireless.png",
+    "ImageAspect": 0.5149700598802395,
+    "Layout": "Extended",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "按键 G4",
+      "按键 G5",
+      "按键 G6",
+      "按键 G7",
+      "按键 G8",
+      "按键 G9",
+      "按键 G10",
+      "按键 G11"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G703Hero",
+    "GHubModelId": "g703_hero",
+    "SlotPrefix": "g703hero",
+    "DisplayName": "G703 LIGHTSPEED",
+    "Aliases": [
+      "G703 HERO",
+      "G703 LIGHTSPEED",
+      "G703 LIGHTSPEED Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      49296,
+      16518
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G703Hero.png",
+    "ImageAspect": 0.516,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5",
+      "DPI 循环 · G6"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G703",
+    "GHubModelId": "g703",
+    "SlotPrefix": "g703",
+    "DisplayName": "G703",
+    "Aliases": [
+      "G703",
+      "G703 LIGHTSPEED Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      49287,
+      16496
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G703.png",
+    "ImageAspect": 0.516,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5",
+      "DPI 循环 · G6"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G403Hero",
+    "GHubModelId": "g403_hero",
+    "SlotPrefix": "g403hero",
+    "DisplayName": "G403 HERO",
+    "Aliases": [
+      "G403 HERO",
+      "G403 HERO Gaming Mouse"
+    ],
+    "ProductIds": [
+      49295
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G403Hero.png",
+    "ImageAspect": 0.516,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5",
+      "DPI 循环 · G6"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G403Wired",
+    "GHubModelId": "g403_wired",
+    "SlotPrefix": "g403-1",
+    "DisplayName": "G403",
+    "Aliases": [
+      "G403",
+      "G403 WIRED",
+      "G403 Prodigy Gaming Mouse"
+    ],
+    "ProductIds": [
+      49283
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G403Wired.png",
+    "ImageAspect": 0.516,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5",
+      "DPI 循环 · G6"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G403Wireless",
+    "GHubModelId": "g403_wireless",
+    "SlotPrefix": "g403",
+    "DisplayName": "G403",
+    "Aliases": [
+      "G403 WIRELESS",
+      "G403",
+      "G403 Prodigy Gaming Mouse Wireless"
+    ],
+    "ProductIds": [
+      16477,
+      49282
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G403Wireless.png",
+    "ImageAspect": 0.516,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5",
+      "DPI 循环 · G6"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G903Hero",
+    "GHubModelId": "g903_hero",
+    "SlotPrefix": "g903hero",
+    "DisplayName": "G903 LIGHTSPEED",
+    "Aliases": [
+      "G903 HERO",
+      "G903 LIGHTSPEED",
+      "G903 LIGHTSPEED Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      49297,
+      16519
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G903Hero.png",
+    "ImageAspect": 0.504,
+    "Layout": "Extended",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "按键 G4",
+      "按键 G5",
+      "按键 G6",
+      "按键 G7",
+      "按键 G8",
+      "按键 G9",
+      "按键 G10",
+      "按键 G11"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G903",
+    "GHubModelId": "g903",
+    "SlotPrefix": "g903",
+    "DisplayName": "G903",
+    "Aliases": [
+      "G903",
+      "G903 LIGHTSPEED Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      49286,
+      16487
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G903.png",
+    "ImageAspect": 0.504,
+    "Layout": "Extended",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "按键 G4",
+      "按键 G5",
+      "按键 G6",
+      "按键 G7",
+      "按键 G8",
+      "按键 G9",
+      "按键 G10",
+      "按键 G11"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G900",
+    "GHubModelId": "g900",
+    "SlotPrefix": "g900",
+    "DisplayName": "G900",
+    "Aliases": [
+      "G900",
+      "G900 Chaos Spectrum Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      49281,
+      16467
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G900.png",
+    "ImageAspect": 0.504,
+    "Layout": "Extended",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "按键 G4",
+      "按键 G5",
+      "按键 G6",
+      "按键 G7",
+      "按键 G8",
+      "按键 G9",
+      "按键 G10",
+      "按键 G11"
+    ],
+    "LightingZoneCount": 2
+  }
+]

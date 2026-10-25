@@ -1,0 +1,10 @@
+<UserControl x:Class="LogiBoardToolBox.Controls.ScreenRegionView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Viewbox Stretch="Uniform">
+        <Canvas x:Name="Surface" Width="640" Height="360" Background="#101720">
+            <Image x:Name="MonitorImage" Width="640" Height="360" Stretch="Fill" Opacity="0.4"/>
+            <TextBlock Text="屏幕采样区域" Canvas.Left="210" Canvas.Top="162" Foreground="#536277" FontSize="24"/>
+        </Canvas>
+    </Viewbox>
+</UserControl>
