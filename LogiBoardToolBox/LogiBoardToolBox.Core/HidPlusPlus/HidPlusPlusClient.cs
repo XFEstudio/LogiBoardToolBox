@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using LogiBoardToolBox.Core.Diagnostics;
 
 namespace LogiBoardToolBox.Core.HidPlusPlus;
 
@@ -22,6 +23,7 @@ public sealed class HidPlusPlusClient(IHidTransport transport, byte deviceIndex)
     public event EventHandler<HidNotification>? Notification;
     public event EventHandler<Exception>? Disconnected;
     public byte DeviceIndex { get; } = deviceIndex;
+    public string DiagnosticId { get; } = Guid.NewGuid().ToString("N");
     public TimeSpan Timeout { get; set; } = TimeSpan.FromMilliseconds(1600);
     public Action<string>? Trace { get; set; }
 
@@ -55,13 +57,19 @@ public sealed class HidPlusPlusClient(IHidTransport transport, byte deviceIndex)
             try
             {
                 lock (sync) { pendingFeature = featureIndex; pendingAddress = address; pending = completion; }
-                Trace?.Invoke("TX " + Convert.ToHexString(request));
+                TraceReport("TX", request);
                 await transport.WriteAsync(request, timeout.Token).ConfigureAwait(false);
                 return await completion.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                DiagnosticLog.Record("hid-error", "timeout", new { DeviceIndex, featureIndex, function, address, Parameters = Convert.ToHexString(parameters) });
                 throw new TimeoutException($"设备 {DeviceIndex:X2} 没有回应。请唤醒鼠标；如果 G HUB 正在配置设备，请先退出 G HUB。");
+            }
+            catch (Exception error)
+            {
+                DiagnosticLog.Record("hid-error", "request failed", new { DeviceIndex, featureIndex, function, address, Parameters = Convert.ToHexString(parameters) }, error);
+                throw;
             }
             finally { lock (sync) if (ReferenceEquals(pending, completion)) pending = null; }
         }
@@ -110,7 +118,7 @@ public sealed class HidPlusPlusClient(IHidTransport transport, byte deviceIndex)
             while (!lifetime.IsCancellationRequested)
             {
                 var report = await transport.ReadAsync(lifetime.Token).ConfigureAwait(false);
-                Trace?.Invoke("RX " + Convert.ToHexString(report));
+                TraceReport("RX", report);
                 if (report.Length < 7 || report[1] != DeviceIndex || report[0] is not (0x10 or 0x11 or 0x12)) continue;
                 var size = report[0] == 0x10 ? 7 : report[0] == 0x11 ? 20 : 64;
                 if (report.Length < size) continue;
@@ -140,9 +148,16 @@ public sealed class HidPlusPlusClient(IHidTransport transport, byte deviceIndex)
         catch (Exception) when (lifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
+            DiagnosticLog.Record("hid-error", "reader disconnected", new { DeviceIndex }, ex);
             lock (sync) { readError = ex; pending?.TrySetException(ex); }
             Disconnected?.Invoke(this, ex);
         }
+    }
+    private void TraceReport(string direction, byte[] report)
+    {
+        var hex = Convert.ToHexString(report);
+        DiagnosticLog.Record("hid", direction, new { DiagnosticId, DeviceIndex, Transport = transport.GetType().FullName, Report = hex });
+        Trace?.Invoke(direction + " " + hex);
     }
     public void Dispose()
     {

@@ -15,6 +15,14 @@ public sealed record SensorPerformance(bool Extended, byte Flags, IReadOnlyList<
             throw new ArgumentOutOfRangeException(nameof(x), $"DPI 必须是传感器支持的数值（{Minimum}–{Maximum}）。");
         if (!IndependentAxes && x != y) throw new NotSupportedException("此传感器不支持独立 X/Y DPI。");
     }
+    public void ValidateProfileDpiEdits(ReadOnlySpan<ushort> xs, ReadOnlySpan<ushort> ys,
+        ReadOnlySpan<ushort> originalXs, ReadOnlySpan<ushort> originalYs)
+    {
+        if (xs.Length != ys.Length || xs.Length != originalXs.Length || xs.Length != originalYs.Length)
+            throw new ArgumentException("DPI 档位数量不一致。");
+        for (var i = 0; i < xs.Length; i++)
+            if (xs[i] != 0 && (xs[i] != originalXs[i] || ys[i] != originalYs[i])) ValidateDpi(xs[i], ys[i]);
+    }
 }
 
 public sealed class PerformanceController(HidPlusPlusClient client, bool wireless)

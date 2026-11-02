@@ -37,8 +37,8 @@ public partial class MainPageViewModel
         catch (NotSupportedException error) { return error.Message; }
         return null;
     }
-    public bool HasIndependentAxes => sensor?.IndependentAxes == true && snapshot?.Capabilities.IsExperimental == true;
-    public bool HasSeparateRates => snapshot?.Capabilities.IsExperimental == true;
+    public bool HasIndependentAxes => sensor?.IndependentAxes == true && snapshot?.Capabilities.HasIndependentAxes == true;
+    public bool HasSeparateRates => snapshot?.Capabilities.HasSeparateRates == true;
     public double DpiMinimum => sensor?.Minimum ?? 100;
     public double DpiMaximum => sensor?.Maximum ?? 25600;
     private double DisplayDpiMaximum => Math.Min(DpiMaximum, Math.Max(6400, Math.Ceiling(Math.Max(sensor?.CurrentX ?? 0, SelectedProfile?.Dpis.Max() ?? 3200) * 1.1 / 1000) * 1000));
@@ -95,12 +95,14 @@ public partial class MainPageViewModel
     {
         var xs = DpiStages.Select(s => s.Enabled ? ushort.Parse(s.Value) : (ushort)0).ToArray();
         var ys = DpiStages.Select(s => s.Enabled ? ushort.Parse(s.LinkAxes ? s.Value : s.ValueY) : (ushort)0).ToArray();
-        if (sensor is not null) for (var i = 0; i < 5; i++) if (xs[i] != 0) sensor.ValidateDpi(xs[i], ys[i]);
-        else if (xs.Any(x => x is > 25600) || ys.Any(y => y is > 25600)) throw new FormatException("未读取传感器能力，DPI 不能超过 25600。");
+        if (sensor is not null)
+            sensor.ValidateProfileDpiEdits(xs, ys, profile.Dpis, profile.GetDpisY(snapshot!.Capabilities));
+        else if (xs.Any(x => x is > 25600) || ys.Any(y => y is > 25600))
+            throw new FormatException("未读取传感器能力，DPI 不能超过 25600。");
         profile.Dpis = xs; profile.SetDpisY(snapshot!.Capabilities, ys);
         profile.DefaultDpiIndex = (byte)(DefaultDpi - 1); profile.ShiftDpiIndex = (byte)(ShiftDpi - 1);
         if (SelectedRate is not null) profile.SetRateHz(snapshot.Capabilities, false, int.Parse(SelectedRate.Id));
-        if (snapshot.Capabilities.IsExperimental && SelectedWirelessRate is not null) profile.SetRateHz(snapshot.Capabilities, true, int.Parse(SelectedWirelessRate.Id));
+        if (snapshot.Capabilities.HasSeparateRates && SelectedWirelessRate is not null) profile.SetRateHz(snapshot.Capabilities, true, int.Parse(SelectedWirelessRate.Id));
         profile.PowerSaveTimeout = ushort.Parse(PowerSaveSeconds); profile.PowerOffTimeout = ushort.Parse(PowerOffSeconds);
     }
     [RelayCommand]

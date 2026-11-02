@@ -1,0 +1,31 @@
+<UserControl x:Class="LogiBoardToolBox.Controls.LuaEditorView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <Grid Background="Black">
+  <Button Content="&#xE72B;" FontFamily="Segoe Fluent Icons" Background="Transparent" BorderThickness="0" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12,26,0,0" Width="36" Click="Back_Click"/>
+  <Grid MaxWidth="1280" Margin="70,70,70,35" ColumnSpacing="30">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="340"/></Grid.ColumnDefinitions>
+   <Grid RowSpacing="15"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <TextBlock Text="LUA 脚本" FontSize="26" FontWeight="Bold"/>
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12"><Button AutomationProperties.AutomationId="lua-import" Content="导入 .lua" Click="Import_Click" IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}"/><Button AutomationProperties.AutomationId="lua-export" Content="导出 .lua" Click="Export_Click"/><Button AutomationProperties.AutomationId="lua-save" Content="保存脚本" Command="{x:Bind ViewModel.SaveLuaCommand}" IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}"/><TextBox Text="{x:Bind ViewModel.LuaName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="脚本名称" Width="240" IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}"/></StackPanel>
+    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10"><Button Content="上一段" Command="{x:Bind ViewModel.PreviousLuaPageCommand}" IsEnabled="{x:Bind ViewModel.HasPreviousLuaPage, Mode=OneWay}"/><TextBlock Text="{x:Bind ViewModel.LuaPageStatus, Mode=OneWay}" VerticalAlignment="Center" Foreground="#AAAAAA" FontSize="12"/><Button Content="下一段" Command="{x:Bind ViewModel.NextLuaPageCommand}" IsEnabled="{x:Bind ViewModel.HasNextLuaPage, Mode=OneWay}"/></StackPanel>
+    <TextBox Grid.Row="3" AutomationProperties.AutomationId="lua-source" Text="{x:Bind ViewModel.LuaEditorText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas" FontSize="14" VerticalContentAlignment="Top" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto" IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}" Background="#151515" Padding="16"/>
+    <TextBlock Grid.Row="4" Text="支持 G HUB OnEvent、鼠标和键盘输出、Sleep 及状态判断。软件 Lua 需要本程序保持运行。" TextWrapping="Wrap" Foreground="#999999" FontSize="12"/>
+   </Grid>
+   <ScrollViewer Grid.Column="1"><StackPanel Spacing="18">
+    <TextBlock Text="软件执行" FontSize="20" FontWeight="Bold"/>
+    <CheckBox Content="左键执行" IsChecked="{x:Bind ViewModel.LuaExecuteLeft, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}"/>
+    <CheckBox Content="右键执行" IsChecked="{x:Bind ViewModel.LuaExecuteRight, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}"/>
+    <TextBlock Text="G HUB 参数：1 左键、2 中键、3 右键。左右键开关控制相应事件；侧键事件保留供脚本切换。" TextWrapping="Wrap" FontSize="12" Foreground="#AAAAAA"/>
+    <StackPanel Orientation="Horizontal" Spacing="12"><Button AutomationProperties.AutomationId="lua-start" Content="启用脚本" Command="{x:Bind ViewModel.StartLuaCommand}" IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}" Background="#00A9E0" Foreground="Black"/><Button Content="关闭脚本" Command="{x:Bind ViewModel.StopLuaCommand}" IsEnabled="{x:Bind ViewModel.LuaRunning, Mode=OneWay}"/></StackPanel>
+    <TextBlock Text="{x:Bind ViewModel.LuaStatus, Mode=OneWay}" TextWrapping="Wrap" FontSize="12" AutomationProperties.AutomationId="lua-status"/>
+    <Rectangle Height="1" Fill="#333333"/>
+    <TextBlock Text="板载转换" FontSize="20" FontWeight="Bold"/>
+    <ComboBox IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}" Header="提取触发事件" ItemsSource="{x:Bind ViewModel.LuaBoardTriggers}" DisplayMemberPath="Label" SelectedItem="{x:Bind ViewModel.LuaBoardTrigger, Mode=TwoWay}" HorizontalAlignment="Stretch"/>
+    <ComboBox IsEnabled="{x:Bind ViewModel.CanEditLua, Mode=OneWay}" Header="板载播放方式" ItemsSource="{x:Bind ViewModel.LuaBoardRepeats}" DisplayMemberPath="Label" SelectedItem="{x:Bind ViewModel.LuaBoardRepeat, Mode=TwoWay}" HorizontalAlignment="Stretch"/>
+    <ProgressRing IsActive="{x:Bind ViewModel.LuaConverting, Mode=OneWay}" Width="24" Height="24" HorizontalAlignment="Left"/><Button Content="取消转换" Command="{x:Bind ViewModel.ConvertLuaToBoardCancelCommand}" Visibility="{x:Bind ViewModel.LuaConverting, Mode=OneWay}"/>
+    <Button AutomationProperties.AutomationId="lua-convert" Content="检查并生成板载宏" Command="{x:Bind ViewModel.ConvertLuaToBoardCommand}" HorizontalAlignment="Stretch"/>
+    <TextBlock Text="支持配置表、数学运算、辅助函数、有限循环及按下/松开动作；转换后选择实体键绑定。无法由固件表达的实时状态或循环会显示具体原因。" TextWrapping="Wrap" FontSize="12" Foreground="#AAAAAA"/>
+    <Expander Header="脚本日志" HorizontalAlignment="Stretch"><TextBlock Text="{x:Bind ViewModel.LuaLog, Mode=OneWay}" FontFamily="Consolas" TextWrapping="Wrap" FontSize="11"/></Expander>
+   </StackPanel></ScrollViewer>
+  </Grid>
+ </Grid>
+</UserControl>

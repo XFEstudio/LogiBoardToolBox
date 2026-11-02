@@ -1,17 +1,21 @@
 using System.Buffers.Binary;
+using LogiBoardToolBox.Core.Diagnostics;
+using LogiBoardToolBox.Core.Onboard;
 
 namespace LogiBoardToolBox.Core.Macros;
 
 public sealed record MacroProgram(MacroRepeat Repeat, IReadOnlyList<byte[]> Press, IReadOnlyList<byte[]> Hold, IReadOnlyList<byte[]> Release)
 {
     public int InstructionCount => Press.Count + Hold.Count + Release.Count;
-    public CompiledMacro ToOnboard()
+    public CompiledMacro ToOnboard(OnboardCapabilities? capabilities = null)
     {
+        if (Repeat == MacroRepeat.Toggle && capabilities?.SupportsNativeToggle != true) throw new NotSupportedException(MacroCompiler.OnboardToggleUnavailable);
         if (Repeat == MacroRepeat.Sequence && Hold.Count != 0)
             throw new NotSupportedException("该序列包含独立的按住循环。格式 1 没有片段跳转指令，无法同时保留点击一次和按住循环；请使用软件模式执行，或清空按住片段后写入点击/松开序列。");
         var output = Press.Select(b => b.ToArray()).ToList();
         if (Repeat == MacroRepeat.Sequence) { output.Add([1]); output.AddRange(Release); }
-        else if (Repeat != MacroRepeat.Once) output.Add([(byte)(Repeat == MacroRepeat.WhileHeld ? 2 : 3)]);
+        else if (Repeat == MacroRepeat.WhileHeld) output.Add([2]);
+        else if (Repeat == MacroRepeat.Toggle) output.Add([3]);
         output.Add([0xFF]);
         return new(output, Repeat);
     }
@@ -45,11 +49,22 @@ public sealed class MacroRuntime(IMacroInputSink sink) : IAsyncDisposable
             ObjectDisposedException.ThrowIf(stopped, this);
             if (runs.TryGetValue(trigger, out var existing))
             {
-                if (program.Repeat == MacroRepeat.Toggle) existing.Cancel.Cancel();
-                return existing.Task;
+                if (!existing.Cancel.IsCancellationRequested)
+                {
+                    if (existing.Program.Repeat == MacroRepeat.Toggle)
+                    {
+                        DiagnosticLog.Record("macro-runtime", "toggle stop", new { trigger });
+                        existing.Cancel.Cancel();
+                    }
+                    return existing.Task;
+                }
             }
-            var run = new Run(program); runs.Add(trigger, run);
-            run.Task = Task.Run(() => ExecuteAsync(trigger, run));
+            // A third press can arrive while the canceled run is still releasing
+            // its keys. Queue the new run behind that cleanup instead of losing it.
+            var predecessor = existing?.Task ?? Task.CompletedTask;
+            var run = new Run(program); runs[trigger] = run;
+            DiagnosticLog.Record("macro-runtime", "start", new { trigger, program.Repeat, RestartAfterCleanup = existing is not null });
+            run.Task = Task.Run(async () => { await predecessor.ConfigureAwait(false); await ExecuteAsync(trigger, run).ConfigureAwait(false); });
             return run.Task;
         }
     }
@@ -57,6 +72,7 @@ public sealed class MacroRuntime(IMacroInputSink sink) : IAsyncDisposable
     {
         lock (sync) if (runs.TryGetValue(trigger, out var run))
         {
+            DiagnosticLog.Record("macro-runtime", "trigger released", new { trigger, run.Program.Repeat });
             run.Released.TrySetResult(); run.HoldCancel.Cancel();
             if (run.Program.Repeat == MacroRepeat.WhileHeld) run.Cancel.Cancel();
         }
@@ -106,6 +122,7 @@ public sealed class MacroRuntime(IMacroInputSink sink) : IAsyncDisposable
             foreach (var key in run.Held.ToArray())
             { try { SetKey(run, key.Kind, key.Code, false); } catch (Exception ex) { Faulted?.Invoke(this, ex); } }
             lock (sync) { if (runs.TryGetValue(trigger, out var current) && current == run) runs.Remove(trigger); }
+            DiagnosticLog.Record("macro-runtime", "stopped", new { trigger, run.Program.Repeat, HeldInputs = run.Held.Count });
             run.Cancel.Dispose(); run.HoldCancel.Dispose();
         }
     }

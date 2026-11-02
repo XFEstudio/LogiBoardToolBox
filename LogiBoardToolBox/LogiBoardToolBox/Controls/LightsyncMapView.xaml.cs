@@ -35,11 +35,12 @@ public sealed partial class LightsyncMapView : UserControl
         RenderedModelId = model.Id;
         var original = model.Layout == "G502X";
         OriginalModel.Visibility = original ? Visibility.Visible : Visibility.Collapsed;
-        CatalogImage.Visibility = !original && model.IsKnown ? Visibility.Visible : Visibility.Collapsed;
+        var hasImage = model.IsKnown && !string.IsNullOrWhiteSpace(model.ImageAsset);
+        CatalogImage.Visibility = !original && hasImage ? Visibility.Visible : Visibility.Collapsed;
         if (Zones is not IEnumerable<LedZoneEditor> source) return;
         if (!original)
         {
-            if (model.IsKnown)
+            if (hasImage)
             {
                 var uri = new Uri("ms-appx:///" + model.ImageAsset.TrimStart('/'));
                 if (CatalogImage.Source is not BitmapImage bitmap || bitmap.UriSource != uri) CatalogImage.Source = new BitmapImage(uri);

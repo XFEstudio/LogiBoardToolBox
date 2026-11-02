@@ -19,10 +19,24 @@ public sealed class MacroPhaseView : UserControl
     private MainPageViewModel Model => App.MouseWorkspace;
     private readonly StackPanel actions = new() { Orientation = Orientation.Horizontal, Spacing = 12, Padding = new(24, 20, 12, 6) };
     private readonly TextBlock title = new() { FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) };
+    internal const int StepsPerPage = 96;
+    private int page;
+    private readonly TextBlock pageText = new() { VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
+    private readonly Button previous = new() { Content = "上一段", Padding = new(8, 3, 8, 3) };
+    private readonly Button next = new() { Content = "下一段", Padding = new(8, 3, 8, 3) };
+    private readonly StackPanel pager = new() { Orientation = Orientation.Horizontal, Spacing = 10 };
+    internal int RenderedActionCount => actions.Children.OfType<Button>().Count() - 1;
+    internal int CurrentPage => page;
+    internal void NextPage() { if (next.IsEnabled) { page++; Rebuild(); } }
     public MacroPhaseView()
     {
         var panel = new StackPanel { Spacing = 6, MinHeight = 116 };
-        panel.Children.Add(title); panel.Children.Add(new ScrollViewer { Content = actions, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Enabled }); Content = panel;
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 20 };
+        pager.Children.Add(previous); pager.Children.Add(pageText); pager.Children.Add(next);
+        heading.Children.Add(title); heading.Children.Add(pager);
+        previous.Click += (_, _) => { if (page > 0) { page--; Rebuild(); } };
+        next.Click += (_, _) => NextPage();
+        panel.Children.Add(heading); panel.Children.Add(new ScrollViewer { Content = actions, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Enabled }); Content = panel;
         Loaded += (_, _) => Rebuild();
     }
     private static void Changed(DependencyObject d, DependencyPropertyChangedEventArgs e) => ((MacroPhaseView)d).Rebuild();
@@ -35,7 +49,12 @@ public sealed class MacroPhaseView : UserControl
     {
         title.Text = Title; actions.Children.Clear();
         var lines = (Script ?? "").Replace("\r", "").Split('\n').Where(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#')).ToArray();
-        for (var i = 0; i < lines.Length; i++)
+        var pages = Math.Max(1, (lines.Length + StepsPerPage - 1) / StepsPerPage);
+        page = Math.Clamp(page, 0, pages - 1);
+        pager.Visibility = pages > 1 ? Visibility.Visible : Visibility.Collapsed;
+        previous.IsEnabled = page > 0; next.IsEnabled = page + 1 < pages;
+        pageText.Text = $"第 {page + 1} / {pages} 段 · 共 {lines.Length:N0} 步";
+        for (var i = page * StepsPerPage; i < Math.Min(lines.Length, (page + 1) * StepsPerPage); i++)
         {
             var index = i; MacroStepEditor step;
             try { step = MacroStepEditor.FromScript(lines[i]); } catch (NotSupportedException) { continue; }

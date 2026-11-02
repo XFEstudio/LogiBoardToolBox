@@ -70,11 +70,15 @@ public partial class MainPageViewModel
         {
             var target = SelectedButton ?? throw new InvalidOperationException("请先在鼠标视图中选择目标按键。");
             if (item is null) return;
+            EnsureProfileRouteEditable(target);
+            if (IsEditingOnboard && item.Action == "macro")
+                _ = Macros.Single(m => m.Name == item.Value).Compile(snapshot?.Capabilities);
             target.SelectedAction = ButtonBindingEditor.ActionChoices.Single(c => c.Id == item.Action);
             target.Value = item.Value; target.FriendlyName = item.Name;
             OnPropertyChanged(nameof(SelectedButtonAction));
             StatusTitle = "按键分配已更新";
-            Status = $"{target.Label} → {item.Name}。保存到板载后关闭软件仍可使用。";
+            Status = IsEditingOnboard ? $"{target.Label} → {item.Name}。有效更改将自动写入并读回校验。"
+                : $"{target.Label} → {item.Name}。启动软件宏后生效，退出软件时停止。";
             RefreshAssignmentPalette();
         }
         catch (Exception ex) { ShowError(ex); }
@@ -83,6 +87,7 @@ public partial class MainPageViewModel
     private void ResetSelectedButton()
     {
         if (SelectedButton is not { } target) return;
+        try { EnsureProfileRouteEditable(target); } catch (Exception error) { ShowError(error); return; }
         (string Action, string Value)[] defaults = [("mouse", "1"), ("mouse", "2"), ("mouse", "3"), ("mouse", "4"), ("special", "dpi-shift"), ("mouse", "5"), ("special", "tilt-left"), ("special", "tilt-right"), ("special", "profile-cycle"), ("special", "dpi-up"), ("special", "dpi-down"), ("special", "scroll-down"), ("special", "scroll-up")];
         if (target.Index < defaults.Length) { var value = defaults[target.Index]; target.SelectedAction = ButtonBindingEditor.ActionChoices.Single(c => c.Id == value.Action); target.Value = value.Value; target.FriendlyName = Core.Onboard.ButtonBinding.Describe(target.BuildBinding()); }
         else { target.SelectedAction = ButtonBindingEditor.ActionChoices[0]; target.Value = ""; target.FriendlyName = ""; }
@@ -92,6 +97,7 @@ public partial class MainPageViewModel
     private void DisableSelectedButton()
     {
         if (SelectedButton is not { } target) return;
+        try { EnsureProfileRouteEditable(target); } catch (Exception error) { ShowError(error); return; }
         target.SelectedAction = ButtonBindingEditor.ActionChoices.Single(c => c.Id == "disabled"); target.FriendlyName = "禁用";
         OnPropertyChanged(nameof(SelectedButtonAction));
     }

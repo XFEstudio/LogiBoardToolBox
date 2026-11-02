@@ -9,6 +9,27 @@ public sealed partial class MacroEditorView : UserControl
     public MainPageViewModel ViewModel => App.MouseWorkspace;
     public event EventHandler? Closed;
     public event EventHandler? RecordRequested;
+    public bool IsStopRecordingTarget(int screenX, int screenY)
+    {
+        if (!ViewModel.IsRecording || StopRecordingButton.Visibility != Visibility.Visible || StopRecordingButton.ActualWidth <= 0) return false;
+        var window = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow);
+        if (GetAncestor(WindowFromPoint(new ScreenPoint { X = screenX, Y = screenY }), 2) != window) return false;
+        var root = (UIElement)App.MainWindow.Content;
+        var bounds = StopRecordingButton.TransformToVisual(root).TransformBounds(new(0, 0, StopRecordingButton.ActualWidth, StopRecordingButton.ActualHeight));
+        var origin = new ScreenPoint();
+        if (!ClientToScreen(WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow), ref origin)) return false;
+        var scale = XamlRoot.RasterizationScale;
+        if (!(screenX >= origin.X + bounds.Left * scale && screenX < origin.X + bounds.Right * scale
+            && screenY >= origin.Y + bounds.Top * scale && screenY < origin.Y + bounds.Bottom * scale)) return false;
+        var hit = VisualTreeHelper.FindElementsInHostCoordinates(new Windows.Foundation.Point((screenX - origin.X) / scale, (screenY - origin.Y) / scale), root).FirstOrDefault();
+        for (DependencyObject? element = hit; element is not null; element = VisualTreeHelper.GetParent(element))
+            if (ReferenceEquals(element, StopRecordingButton)) return true;
+        return false;
+    }
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct ScreenPoint { public int X, Y; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)] private static extern bool ClientToScreen(IntPtr window, ref ScreenPoint point);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(ScreenPoint point);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
     private MacroEditor? previous, created;
     private MacroDraft? original;
     private int stage;
@@ -35,10 +56,11 @@ public sealed partial class MacroEditorView : UserControl
         ResetButton.IsEnabled = current is not null && (original is null ? !string.IsNullOrEmpty(current.Script + current.HoldScript + current.ReleaseScript) : original != MacroDraft.Read(current));
     }
     public void BeginEdit() { stage = 0; created = null; previous = ViewModel.SelectedMacro; original = previous is null ? null : MacroDraft.Read(previous); ShowStage(); }
+    public void BeginImported(MacroEditor macro) { stage = 0; created = macro; previous = ViewModel.Macros.FirstOrDefault(m => !ReferenceEquals(m, macro)); original = null; ShowStage(); }
     public void BeginCreate()
     {
         previous = ViewModel.SelectedMacro; ViewModel.AddMacroCommand.Execute(null); created = ViewModel.SelectedMacro!;
-        created.Name = ""; created.Script = ""; created.HoldScript = ""; created.ReleaseScript = ""; created.UseStandardDelay = true;
+        created.Name = ""; created.Script = ""; created.HoldScript = ""; created.ReleaseScript = ""; created.UseStandardDelay = false;
         original = null; stage = 1; ShowStage(); if (!Utilities.UiVerification.IsRequested) MacroNameField.Focus(FocusState.Programmatic);
     }
     public void AdvanceName() { if (string.IsNullOrWhiteSpace(ViewModel.SelectedMacro?.Name)) return; ViewModel.SelectedMacro.Name = ViewModel.SelectedMacro.Name.Trim(); stage = 2; ShowStage(); }
@@ -46,12 +68,14 @@ public sealed partial class MacroEditorView : UserControl
     private void ShowStage() { NamingPanel.Visibility = stage == 1 ? Visibility.Visible : Visibility.Collapsed; TypePanel.Visibility = stage == 2 ? Visibility.Visible : Visibility.Collapsed; EditorPanel.Visibility = stage == 0 ? Visibility.Visible : Visibility.Collapsed; UpdateTypes(); }
     public void CancelWithoutPrompt()
     {
+        if (ViewModel.IsRecording) RecordRequested?.Invoke(this, EventArgs.Empty);
         if (created is not null) { ViewModel.SelectedMacro = created; ViewModel.RemoveMacroCommand.Execute(null); ViewModel.SelectedMacro = previous; created = null; }
         else if (original is not null && ViewModel.SelectedMacro is { } macro) original.Restore(macro);
         Closed?.Invoke(this, EventArgs.Empty);
     }
     private async void Back_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.IsRecording) RecordRequested?.Invoke(this, EventArgs.Empty);
         if (stage != 0 || ViewModel.SelectedMacro is not { } macro || original == MacroDraft.Read(macro)) { CancelWithoutPrompt(); return; }
         var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "是否保存对宏的更改？", PrimaryButtonText = "是", SecondaryButtonText = "否", CloseButtonText = "取消" };
         switch (await dialog.ShowAsync()) { case ContentDialogResult.Primary: await Save(); break; case ContentDialogResult.Secondary: CancelWithoutPrompt(); break; }
@@ -64,8 +88,21 @@ public sealed partial class MacroEditorView : UserControl
     private void MacroColor_Changed(ColorPicker sender, ColorChangedEventArgs e) { if (ViewModel.SelectedMacro is { } macro) macro.Color = $"#{e.NewColor.R:X2}{e.NewColor.G:X2}{e.NewColor.B:X2}"; }
     private void Reset_Click(object sender, RoutedEventArgs e) { if (original is not null && ViewModel.SelectedMacro is { } macro) original.Restore(macro); else if (created is not null) { created.Script = ""; created.HoldScript = ""; created.ReleaseScript = ""; } }
     private async void Save_Click(object sender, RoutedEventArgs e) => await Save();
+    private async void ExportLua_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (ViewModel.IsRecording) RecordRequested?.Invoke(this, EventArgs.Empty);
+            var macro = ViewModel.SelectedMacro ?? throw new InvalidOperationException("请先选择宏。");
+            var source = Core.Macros.LuaMacroExport.Export(macro.Name, macro.CompileProgram(), int.Parse(ViewModel.LuaBoardTrigger.Id));
+            var path = await Services.LuaFileExport.SaveAsync(macro.Name, source);
+            if (path is not null) ViewModel.MacroPreview = "宏已导出为 Lua：" + path;
+        }
+        catch (Exception error) { ViewModel.MacroPreview = "Lua 导出失败：" + error.Message; Core.Diagnostics.DiagnosticLog.Record("macro-lua-export", "failed", error: error); }
+    }
     private async Task Save()
     {
+        if (ViewModel.IsRecording) RecordRequested?.Invoke(this, EventArgs.Empty);
         if (original is { } before && ViewModel.SelectedMacro is { } current && before.Name != current.Name)
             foreach (var row in ViewModel.AllBindings.Where(r => r.SelectedAction.Id == "macro" && r.Value == before.Name)) { row.Value = current.Name; row.FriendlyName = current.Name; }
         await ViewModel.SaveMacrosCommand.ExecuteAsync(null);

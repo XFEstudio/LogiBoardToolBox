@@ -39,8 +39,6 @@ namespace LogiBoardToolBox
         {
             if (closing) return;
             args.Cancel = true; closing = true;
-            try { await App.MouseWorkspace.FlushImmediateSaveAsync(); }
-            catch (Exception ex) { closing = false; App.MouseWorkspace.ShowError(ex); return; }
             try { await App.MouseWorkspace.ShutdownAsync(); }
             catch (Exception ex) { Console.WriteLine("关闭时恢复设备：" + ex.Message); }
             finally { Close(); }

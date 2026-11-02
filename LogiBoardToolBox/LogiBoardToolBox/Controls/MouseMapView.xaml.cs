@@ -65,9 +65,10 @@ public sealed partial class MouseMapView : UserControl
         var originalLayout = model.Layout == "G502X";
         TopView.Visibility = originalLayout && !IsSideView ? Visibility.Visible : Visibility.Collapsed;
         SideView.Visibility = originalLayout && IsSideView ? Visibility.Visible : Visibility.Collapsed;
-        ModelImage.Visibility = !originalLayout && model.IsKnown ? Visibility.Visible : Visibility.Collapsed;
-        GenericSilhouette.Visibility = !model.IsKnown ? Visibility.Visible : Visibility.Collapsed;
-        if (!originalLayout && model.IsKnown)
+        var hasImage = model.IsKnown && !string.IsNullOrWhiteSpace(model.ImageAsset);
+        ModelImage.Visibility = !originalLayout && hasImage ? Visibility.Visible : Visibility.Collapsed;
+        GenericSilhouette.Visibility = !originalLayout && !hasImage ? Visibility.Visible : Visibility.Collapsed;
+        if (!originalLayout && hasImage)
         {
             var uri = new Uri("ms-appx:///" + model.ImageAsset.TrimStart('/'));
             if (ModelImage.Source is not BitmapImage current || current.UriSource != uri) ModelImage.Source = new BitmapImage(uri);

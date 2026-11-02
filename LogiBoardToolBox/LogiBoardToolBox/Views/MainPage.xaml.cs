@@ -10,6 +10,9 @@ namespace LogiBoardToolBox.Views;
 public sealed partial class MainPage : Page
 {
     private MacroRecorder? recorder;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> pendingRecordedSteps = new();
+    private int recordingDrainQueued;
+    private bool stoppingRecording;
     private readonly System.Diagnostics.Stopwatch previewTime = System.Diagnostics.Stopwatch.StartNew();
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? previewTimer;
     private CancellationTokenSource? lightEditDelay;
@@ -76,21 +79,40 @@ public sealed partial class MainPage : Page
             if (recorder is null)
             {
                 recorder = new MacroRecorder();
-                recorder.StepRecorded += (_, step) => DispatcherQueue.TryEnqueue(() =>
+                recorder.StepRecorded += (_, step) =>
                 {
-                    if (!ViewModel.IsRecording) return;
-                    if (step.StartsWith("delay ") && ViewModel.SelectedMacro?.UseStandardDelay == true) return;
-                    if (ViewModel.Timeline.Count >= 5000) { StopRecording(); ViewModel.ShowError(new InvalidOperationException("录制已达到步骤上限。")); return; }
-                    var row = MacroStepEditor.FromScript(step);
-                    ViewModel.Timeline.Add(row); ViewModel.SelectedStep = row;
-                });
+                    Core.Diagnostics.DiagnosticLog.Record("recorder", "step", new { Step = step });
+                    pendingRecordedSteps.Enqueue(step);
+                    if (Interlocked.Exchange(ref recordingDrainQueued, 1) == 0) DispatcherQueue.TryEnqueue(DrainRecordedSteps);
+                };
             }
-            recorder.Start(WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow));
+            recorder.Start(WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow), MacroEditorHost.IsStopRecordingTarget);
             ViewModel.IsRecording = true;
+            Core.Diagnostics.DiagnosticLog.Record("recorder", "started", new { ViewModel.SelectedMacro.Name, ViewModel.SelectedMacro.UseStandardDelay });
         }
         catch (Exception ex) { StopRecording(); ViewModel.ShowError(ex); }
     }
-    private void StopRecording() { recorder?.Stop(); ViewModel.IsRecording = false; }
+    private void AppendRecordedStep(string step)
+    {
+                    if (!ViewModel.IsRecording) return;
+                    if (step.StartsWith("delay ") && ViewModel.SelectedMacro?.UseStandardDelay == true) return;
+                    var limitReached = !stoppingRecording && ViewModel.Timeline.Count >= 5000;
+                    var row = MacroStepEditor.FromScript(step);
+                    ViewModel.Timeline.Add(row); ViewModel.SelectedStep = row;
+                    if (limitReached) { StopRecording(); ViewModel.ShowError(new InvalidOperationException("录制已达到步骤上限，已保留当前步骤并补齐松开。")); }
+    }
+    private void DrainRecordedSteps()
+    {
+        Interlocked.Exchange(ref recordingDrainQueued, 0);
+        while (pendingRecordedSteps.TryDequeue(out var step)) AppendRecordedStep(step);
+    }
+    private void StopRecording()
+    {
+        if (stoppingRecording) return;
+        stoppingRecording = true;
+        try { var wasRecording = ViewModel.IsRecording; recorder?.Stop(); DrainRecordedSteps(); ViewModel.IsRecording = false; if (wasRecording) Core.Diagnostics.DiagnosticLog.Record("recorder", "stopped"); }
+        finally { stoppingRecording = false; }
+    }
     private void Assignment_ItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not AssignmentItem item) return;
@@ -202,6 +224,7 @@ public sealed partial class MainPage : Page
         InitializeComponent();
         DataContext = ViewModel;
         ViewModel.AttachDispatcher(DispatcherQueue);
+        ViewModel.LuaMacroCreated += LuaMacro_Created;
         DeviceHeader.Translation = new(0, 8, 0);
         App.MainWindow.SetTitleBar(WindowDragRegion);
         Unloaded += (_, _) => { StopRecording(); previewTimer?.Stop(); lightEditDelay?.Cancel(); ViewModel.PropertyChanged -= ViewModel_PropertyChanged; ViewModel.LightsyncEdited -= Lightsync_Edited; };

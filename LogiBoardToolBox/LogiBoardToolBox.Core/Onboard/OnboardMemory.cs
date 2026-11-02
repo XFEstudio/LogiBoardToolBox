@@ -1,5 +1,6 @@
 using System.Text.Json;
 using LogiBoardToolBox.Core.HidPlusPlus;
+using LogiBoardToolBox.Core.Diagnostics;
 
 namespace LogiBoardToolBox.Core.Onboard;
 
@@ -66,14 +67,42 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
             DeviceIdentity = deviceIdentity, DeviceName = deviceName, Description = description,
             Mode = mode[0], ActiveSector = (ushort)((active[0] << 8) | active[1])
         };
+        DiagnosticLog.Record("memory-read", "begin", new { deviceIdentity, deviceName, client.DiagnosticId, Description = Convert.ToHexString(description), Capabilities = caps, snapshot.Mode, snapshot.ActiveSector });
         var sectors = Enumerable.Range(0, caps.SectorCount).Concat(Enumerable.Range(0x100, caps.FactoryProfileCount + 1)).ToArray();
         foreach (var sector in sectors)
         {
             progress?.Report($"读取存储扇区 0x{sector:X4}");
-            try { snapshot.Sectors[sector] = await ReadSectorAsync(sector, caps.SectorSize, ct).ConfigureAwait(false); }
-            catch (HidPlusPlusException ex) { snapshot.ReadErrors[sector] = ex.Message; }
+            try { snapshot.Sectors[sector] = await ReadSectorWithRecoveryAsync(sector, caps, ct).ConfigureAwait(false); }
+            catch (HidPlusPlusException ex)
+            {
+                snapshot.ReadErrors[sector] = ex.Message;
+                DiagnosticLog.Record("memory-read", "sector unavailable", new { deviceIdentity, sector }, ex);
+            }
         }
+        DiagnosticLog.Record("memory-read", "snapshot", snapshot);
         return snapshot;
+    }
+
+    private async Task<byte[]> ReadSectorWithRecoveryAsync(int sector, OnboardCapabilities caps, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            byte[] data;
+            try { data = await ReadSectorAsync(sector, caps.SectorSize, ct).ConfigureAwait(false); }
+            catch (Exception error) when (attempt < 3 && (error is TimeoutException || error is IOException and not HidPlusPlusException))
+            {
+                DiagnosticLog.Record("memory-read", "retry communication", new { deviceIdentity, sector, attempt }, error);
+                await Task.Delay(30, ct).ConfigureAwait(false); continue;
+            }
+            var valid = SectorChecksum.IsValid(data); var erased = SectorChecksum.IsErased(data);
+            DiagnosticLog.Record("memory-read", "sector", new { deviceIdentity, sector, attempt, ValidCrc = valid,
+                Erased = erased, RequiresCrc = !caps.IsRawMacroSector(sector), StoredCrc = Convert.ToHexString(data.AsSpan(data.Length - 2)),
+                CalculatedCrc = SectorChecksum.Compute(data.AsSpan(0, data.Length - 2)).ToString("X4"), Raw = Convert.ToHexString(data) });
+            // Factory images can use an unsealed CRC. Preserve them verbatim. Writable
+            // sectors are retried after a bad CRC; an erased flash page is also preserved.
+            if (caps.IsRawMacroSector(sector) || valid || erased || sector >= caps.SectorCount || attempt == 3) return data;
+            await Task.Delay(30, ct).ConfigureAwait(false);
+        }
     }
 
     private async Task<byte[]> ReadSectorAsync(int sector, int size, CancellationToken ct)
@@ -137,22 +166,25 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
         await operationGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            DiagnosticLog.Record("memory-write", "plan", plan);
             if (plan.Baseline.DeviceIdentity != deviceIdentity) throw new InvalidOperationException("设备已更换，请重新读取。");
             var baseline = plan.Baseline;
             var caps = baseline.Capabilities;
             if (!caps.CanEditProfiles || plan.Changes.Select(c => c.Sector).Distinct().Count() != plan.Changes.Count ||
                 plan.Changes.Any(c => c.Sector < 0 || c.Sector >= caps.SectorCount || c.After.Length != caps.SectorSize ||
-                    c.Before.Length != caps.SectorSize || !(SectorChecksum.IsValid(c.After) || plan.RestoresErasedSectors && c.Sector > caps.ProfileCount && c.After.All(b => b == 0xFF)) ||
+                    c.Before.Length != caps.SectorSize || !caps.IsValidSectorWrite(c.Sector, c.After, plan.RestoresErasedSectors) ||
                     !baseline.Sectors.TryGetValue(c.Sector, out var b) || !b.SequenceEqual(c.Before)))
                 throw new InvalidDataException("写入计划无效。");
-            if (plan.RestoresErasedSectors)
+            if (plan.RestoresErasedSectors || caps.UsesLegacyMacroPages)
             {
                 var after = new MemorySnapshot { Description = baseline.Description, Sectors = baseline.Sectors.ToDictionary(p => p.Key, p => p.Value) };
                 foreach (var change in plan.Changes) after.Sectors[change.Sector] = change.After;
                 _ = MacroAllocator.FindReferencedSectors(after);
             }
             var currentDescription = await client.FeatureAsync(Feature, 0, ct: ct).ConfigureAwait(false);
-            if (!currentDescription.Take(11).SequenceEqual(baseline.Description.Take(11))) throw new InvalidOperationException("设备固件或板载布局发生变化，请重新读取。");
+            if (!currentDescription.Take(11).SequenceEqual(baseline.Description.Take(11)) ||
+                !caps.HasSameMacroExecution(OnboardCapabilities.Parse(currentDescription)))
+                throw new InvalidOperationException("设备固件或板载布局发生变化，请重新读取。");
             progress?.Report("检查设备是否被其他程序修改…");
             for (var sector = 0; sector < caps.SectorCount; sector++)
             {
@@ -162,6 +194,7 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
             }
             var backupPath = Path.Combine(backupDirectory, $"onboard-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.json");
             await SaveBackupAsync(baseline, backupPath, ct).ConfigureAwait(false);
+            DiagnosticLog.Record("memory-write", "backup", new { backupPath });
             progress?.Report("原始配置已备份，切换到板载模式…");
             var oldMode = (await client.FeatureAsync(Feature, 2, ct: ct).ConfigureAwait(false))[0];
             var oldActive = await client.FeatureAsync(Feature, 4, ct: ct).ConfigureAwait(false);
@@ -176,16 +209,19 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
                     touched.Add(change);
                     progress?.Report($"写入并校验 {change.Purpose} · 扇区 {change.Sector}");
                     await WriteSectorAsync(change.Sector, change.After, ct).ConfigureAwait(false);
+                    DiagnosticLog.Record("memory-write", "sector verified", new { change.Sector, change.Purpose, Before = Convert.ToHexString(change.Before), After = Convert.ToHexString(change.After) });
                 }
                 await client.FeatureAsync(Feature, 3, [(byte)(plan.ActivateSector >> 8), (byte)plan.ActivateSector], ct).ConfigureAwait(false);
                 var mode = await client.FeatureAsync(Feature, 2, ct: ct).ConfigureAwait(false);
                 var active = await client.FeatureAsync(Feature, 4, ct: ct).ConfigureAwait(false);
                 if (mode[0] != 1 || ((active[0] << 8) | active[1]) != plan.ActivateSector)
                     throw new IOException("写入完成，但无法确认板载模式和活动配置。");
+                DiagnosticLog.Record("memory-write", "completed", new { SectorsWritten = touched.Count, backupPath, plan.ActivateSector });
                 return new(touched.Count, backupPath);
             }
             catch (Exception writeError)
             {
+                DiagnosticLog.Record("memory-write", "rollback started", error: writeError);
                 progress?.Report("写入未完成，正在尝试恢复原始数据…");
                 var rollbackErrors = new List<string>();
                 using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(45));
@@ -201,6 +237,7 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
                     await client.FeatureAsync(Feature, 1, [oldMode], recovery.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex) { rollbackErrors.Add("模式恢复: " + ex.Message); }
+                DiagnosticLog.Record("memory-write", "rollback completed", new { rollbackErrors, backupPath });
                 throw new IOException($"{writeError.Message}\n" +
                     (rollbackErrors.Count == 0 ? "已读回验证并恢复写入前的数据。" : "自动恢复未完成：" + string.Join("；", rollbackErrors)) +
                     $"\n原始备份：{backupPath}", writeError);

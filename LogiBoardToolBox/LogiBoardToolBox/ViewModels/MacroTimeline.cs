@@ -45,15 +45,20 @@ public partial class MainPageViewModel
     [ObservableProperty] public partial MacroStepEditor? SelectedStep { get; set; }
     [ObservableProperty] public partial EditorChoice SelectedMacroSegment { get; set; } = new("press", "点击");
     [ObservableProperty] public partial bool IsRecording { get; set; }
-    public string RecordingStatus => IsRecording ? "● 正在录制键盘和应用外鼠标操作，再次点击录制按钮停止。" : "录制已停止";
+    public string RecordingStatus => IsRecording ? "● 正在录制键盘和鼠标，软件内左右键也会录入；仅“停止录制”按钮不录入。" : "录制已停止";
     partial void OnIsRecordingChanged(bool value) => OnPropertyChanged(nameof(RecordingStatus));
     public IReadOnlyList<EditorChoice> MacroSegments { get; } = [new("press", "点击"), new("hold", "按住"), new("release", "松开")];
     public bool IsSequenceMacro => SelectedMacro?.Repeat == MacroRepeat.Sequence;
+    public bool ShowSoftwareToggleHint => IsEditingOnboard && SelectedMacro?.Repeat == MacroRepeat.Toggle && snapshot?.Capabilities.SupportsNativeToggle != true;
+    public bool ShowNativeToggleHint => IsEditingOnboard && SelectedMacro?.Repeat == MacroRepeat.Toggle && snapshot?.Capabilities.SupportsNativeToggle == true;
     public string MacroTypeDescription => SelectedMacro?.Repeat switch
     {
         MacroRepeat.Once => "按下时执行一次。",
         MacroRepeat.WhileHeld => "按住鼠标按键时重复，松开时停止并释放宏按键。",
-        MacroRepeat.Toggle => "按下开始重复，再次按下停止。停止软件宏也会释放所有宏按键。",
+        MacroRepeat.Toggle => IsEditingOnboard ? snapshot?.Capabilities.SupportsNativeToggle == true
+            ? "按下开始重复，再次按下停止。由鼠标固件执行，关闭软件后仍有效。"
+            : "此鼠标的固件未声明板载同键触发能力；不会写成持续循环或按住循环。"
+            : "按下开始重复，再次按下停止。退出软件或停止软件宏时，立即停止并释放所有宏按键。",
         MacroRepeat.Sequence => "点击片段执行一次；按住片段持续循环；松开时执行松开片段一次。空的按住片段可编译为固件等待松开序列。",
         _ => "选择宏类型"
     };
@@ -64,15 +69,16 @@ public partial class MainPageViewModel
         selectedMacroName = newValue?.Name ?? "";
         SelectedMacroSegment = MacroSegments[0];
         LoadTimeline();
-        OnPropertyChanged(nameof(IsSequenceMacro)); OnPropertyChanged(nameof(MacroTypeDescription));
+        OnPropertyChanged(nameof(IsSequenceMacro)); OnPropertyChanged(nameof(MacroTypeDescription)); OnPropertyChanged(nameof(ShowSoftwareToggleHint)); OnPropertyChanged(nameof(ShowNativeToggleHint));
     }
     private void MacroEditorChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MacroEditor.SelectedRepeat))
         {
             if (!IsSequenceMacro) SelectedMacroSegment = MacroSegments[0];
-            OnPropertyChanged(nameof(IsSequenceMacro)); OnPropertyChanged(nameof(MacroTypeDescription));
+            OnPropertyChanged(nameof(IsSequenceMacro)); OnPropertyChanged(nameof(MacroTypeDescription)); OnPropertyChanged(nameof(ShowSoftwareToggleHint)); OnPropertyChanged(nameof(ShowNativeToggleHint));
         }
+        DiagnosticLogMacroEdit(sender as MacroEditor, e.PropertyName);
         if (e.PropertyName == nameof(MacroEditor.Name) && SelectedMacro is { } renamed)
         {
             foreach (var row in AllBindings.Where(r => r.SelectedAction.Id == "macro" && r.Value == selectedMacroName))
@@ -81,6 +87,11 @@ public partial class MainPageViewModel
         }
         if (e.PropertyName == nameof(MacroEditor.Color)) RefreshAssignmentPalette();
         if (!applyingTimeline && e.PropertyName is nameof(MacroEditor.Script) or nameof(MacroEditor.HoldScript) or nameof(MacroEditor.ReleaseScript)) LoadTimeline();
+    }
+    private static void DiagnosticLogMacroEdit(MacroEditor? macro, string? property)
+    {
+        if (macro is null || property is not (nameof(MacroEditor.SelectedRepeat) or nameof(MacroEditor.Script) or nameof(MacroEditor.HoldScript) or nameof(MacroEditor.ReleaseScript) or nameof(MacroEditor.UseStandardDelay) or nameof(MacroEditor.StandardDelay))) return;
+        Core.Diagnostics.DiagnosticLog.Record("macro-editor", property, new { macro.Name, macro.Repeat, macro.Script, macro.HoldScript, macro.ReleaseScript, macro.UseStandardDelay, macro.StandardDelay });
     }
     public void InitializeMacroTimeline()
     {

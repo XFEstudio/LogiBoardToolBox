@@ -45,12 +45,22 @@ public partial class ButtonBindingEditor : ObservableObject
     public int Index { get; }
     public bool GShift { get; }
     public string Label { get; }
-    public string CurrentAction { get; }
+    public string CurrentAction => ButtonBinding.DescribeForDisplay(Original);
     public byte[] Original { get; }
     [ObservableProperty] public partial EditorChoice SelectedAction { get; set; } = ActionChoices[0];
     [ObservableProperty] public partial string Value { get; set; } = "";
     [ObservableProperty] public partial string FriendlyName { get; set; } = "";
-    public string DisplayAction => SelectedAction.Id == "keep" ? CurrentAction : string.IsNullOrWhiteSpace(FriendlyName) ? (SelectedAction.Id == "disabled" ? "禁用" : Value) : FriendlyName;
+    public string DisplayAction
+    {
+        get
+        {
+            if (SelectedAction.Id == "keep") return string.IsNullOrWhiteSpace(FriendlyName) ? CurrentAction : FriendlyName;
+            if (!string.IsNullOrWhiteSpace(FriendlyName)) return FriendlyName;
+            if (SelectedAction.Id == "macro") return string.IsNullOrWhiteSpace(Value) ? "选择宏" : Value;
+            try { return ButtonBinding.DescribeForDisplay(BuildBinding()); }
+            catch (Exception error) when (error is FormatException or ArgumentException or OverflowException) { return "等待完整设置"; }
+        }
+    }
     public string ValueHint => SelectedAction.Id switch
     {
         "mouse" => "1 左键 / 2 右键 / 3 中键 / 4 后退 / 5 前进",
@@ -60,13 +70,19 @@ public partial class ButtonBindingEditor : ObservableObject
         "macro" => "填写宏库中的名称，或使用宏页的绑定按钮",
         _ => "此操作无需填写参数"
     };
-    partial void OnSelectedActionChanged(EditorChoice value) { OnPropertyChanged(nameof(ValueHint)); OnPropertyChanged(nameof(DisplayAction)); }
-    partial void OnValueChanged(string value) => OnPropertyChanged(nameof(DisplayAction));
+    partial void OnSelectedActionChanged(EditorChoice value) { FriendlyName = ""; OnPropertyChanged(nameof(ValueHint)); OnPropertyChanged(nameof(DisplayAction)); }
+    partial void OnValueChanged(string value) { FriendlyName = ""; OnPropertyChanged(nameof(DisplayAction)); }
     partial void OnFriendlyNameChanged(string value) => OnPropertyChanged(nameof(DisplayAction));
     public ButtonBindingEditor(int index, bool gshift, string name, byte[] original)
     {
         Index = index; GShift = gshift; Label = $"{index + 1:00}  {name}";
-        Original = original; CurrentAction = ButtonBinding.Describe(original);
+        Original = (byte[])original.Clone();
+    }
+    public void RefreshOriginal(byte[] binding)
+    {
+        if (binding.Length != 4) throw new ArgumentException("按键绑定必须是 4 字节。");
+        binding.CopyTo(Original, 0);
+        OnPropertyChanged(nameof(CurrentAction)); OnPropertyChanged(nameof(DisplayAction));
     }
     public byte[] BuildBinding() => SelectedAction.Id switch
     {
@@ -129,9 +145,9 @@ public partial class MacroEditor : ObservableObject
         get { try { var c = Core.Lighting.Rgb.Parse(Color); return new(Windows.UI.Color.FromArgb(255, c.R, c.G, c.B)); } catch (FormatException) { return new(Microsoft.UI.Colors.Cyan); } }
     }
     partial void OnColorChanged(string value) => OnPropertyChanged(nameof(ColorBrush));
-    public CompiledMacro Compile()
+    public CompiledMacro Compile(OnboardCapabilities? capabilities = null)
     {
-        return CompileProgram().ToOnboard();
+        return CompileProgram().ToOnboard(capabilities);
     }
     public MacroProgram CompileProgram() => MacroCompiler.CompileProgram(Script, Repeat, HoldScript, ReleaseScript,
         UseStandardDelay ? (ushort)MacroCompiler.Number(StandardDelay, 1, 65535) : (ushort)0);

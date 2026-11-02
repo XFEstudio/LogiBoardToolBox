@@ -14,7 +14,28 @@
 | G703 / G703 HERO | g703 / g703hero | 按实际接口 | 待验证 |
 | G900 / G903 / G903 HERO | g900 / g903 / g903hero | 按实际接口 | 待验证 |
 
-SUPERLIGHT 2 等后续型号不冒充第一代 SUPERLIGHT。无法唯一识别时显示通用分配图；未知板载格式保留读取和备份，不套用 G502 的扩展布局。未初始化存储或读取不完整时仍停止写入，不能把读失败当作空白闪存。
+SUPERLIGHT 2 等后续型号按独立系列识别，不冒充第一代 SUPERLIGHT。无法唯一识别时显示通用分配图；未知板载格式保留读取和备份，不套用 G502 的扩展布局。未初始化存储或读取不完整时仍停止写入，不能把读失败当作空白闪存。
+
+## 2026-10-29 识别修正
+
+目录增加至 18 个型号系列，并区分国行名称对应的实际产品：
+
+| 型号系列 | 身份依据 | 界面与当前验证范围 |
+| --- | --- | --- |
+| PRO 2 LIGHTSPEED / GPW4 朱雀 | USB C09A、无线 WPID 40A8 | 八键对称布局；专属图暂缺时显示通用点位，板载执行待实机验证 |
+| PRO X SUPERLIGHT 2 / SE（GPW3 / GPW2 金刚） | USB C09B、无线 WPID 40A9；2 与 SE 共用设备 ID | 五键、无 RGB；同系列识别，不按共用 PID 冒认第一代，板载执行待实机验证 |
+| PRO X SUPERLIGHT 2 DEX / GPW4 鹰眼 | USB C0A0、无线 WPID 40B8 | 五键、无 RGB；与朱雀分开识别，板载执行待实机验证 |
+| G402 Hyperion Fury | USB C07E，HID++ 2.0 | 八键及本机 G HUB 原始设备图；实际布局和宏能力由设备回复决定，待实机验证 |
+
+国行型号对应关系由[罗技官方商城](https://store.logitech.com.cn/Wap/Product/Detail/12400)确认。USB/WPID 目录交叉核对 [OpenLogi 型号目录](https://openlogi.org/hidpp/model-ids)、[OpenMouse 驱动注册与支持列表](https://openmouse.app/supported)和 [libratbag 的 G402 定义](https://github.com/libratbag/libratbag/blob/master/data/devices/logitech-g402.device)。G402 图片来自本机 `core_assets/thumbnails/g402.png`，遵循 [素材来源](ASSET-PROVENANCE.md)。本机新型号的 G HUB 元数据为加密资源，尚未取得可核对的专属图片和宏槽位前缀，因此这些系列暂不直接导入 G HUB 配置；普通宏和 Lua 导入不依赖 G HUB 槽位前缀。
+
+扫描不再因缺少 `0x8100` 板载接口而隐藏已识别、可以回应 HID++ 的鼠标；这类设备显示能力说明，并保持写入受限。未知 HID++ 接收器根设备或键盘不会因此被误当成受支持鼠标。已知有线 USB 鼠标直接探测 FF 地址，避免依次等待六个不存在的接收器槽位。身份和能力探测只读，不修改固件、配对、监听或闪存。
+
+新设备如返回格式 7，不能套用旧的格式 1–5。本轮对照 [OpenMouse 对 G HUB 原生布局及实机数据的研究](https://github.com/OpenMouse-Project/mouse-protocol/blob/main/docs/logitech-onboard-profiles.md) 增加独立的受限编解码：按键表位于 0x30 / 0x70（各 12 条）；DPI 默认/Shift 索引在 0x02/0x03，独立 X/Y 记录在 0x04 起每项五字节；有线/无线回报率枚举位于 0x01/0x00，闲置字段位于 0x2C/0x2E，名称仍在 0xA0。保留每个已有启用档位的 LOD、未知区、保留按键区及灯效字节，拒绝调用旧偏移写入；启用/停用速度时只按 G HUB 的对应三元记录规则更新有效性。
+
+格式 7 仅接受内存模型 1、255 字节扇区、最多五个配置及十二个按键，并检查配置目录、可写/宏扇区边界、CRC 和每个 DPI 三元记录；格式 1 宏由共享的空间分配器写入，其他宏格式继续拒绝。有线回报率限制在已核对的 1000 Hz 以内，无线值仍受实际传感器能力约束。板载 RGB 的原始位置虽然已知，但原生效果编码尚未完成交叉验证，因此格式 7 暂不启用持久化灯效写入，所有灯效区和标志保持原样；实时软件灯效仍依实际 HID++ 能力运行。
+
+验证包含公开的格式 7 出厂扇区（CRC 84DB）逐字节编解码、双轴/回报率/按键/G-Shift/名称/闲置偏移、未知字节与 LOD 保留，以及内存设备中的宏写入、读回和完整恢复。上述为协议与模拟事务验证，尚未在用户的朱雀、金刚或其他格式 7 实体鼠标上执行；也未写入当前 G502 X PLUS。
 
 ## 操作与写入
 

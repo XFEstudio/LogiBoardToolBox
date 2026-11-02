@@ -130,7 +130,7 @@
                     </Flyout>
                 </AppBarButton.Flyout>
             </AppBarButton>
-            <AppBarButton Label="导出日志" Command="{x:Bind ViewModel.ExportLogCommand}">
+            <AppBarButton Label="导出诊断包" AutomationProperties.AutomationId="logs-export-diagnostics" Command="{x:Bind ViewModel.ExportLogCommand}">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xEDE1;"/>
                 </AppBarButton.Icon>

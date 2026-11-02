@@ -11,20 +11,25 @@ public sealed class MacroRecorder : IDisposable
 {
     private readonly HookCallback keyboardCallback;
     private readonly HookCallback mouseCallback;
-    private readonly HashSet<uint> heldKeys = [];
-    private readonly HashSet<int> heldMouse = [];
+    private readonly Dictionary<uint, string> heldKeys = [];
+    private readonly MouseRecordingFilter mouseFilter = new();
     private readonly Stopwatch timer = new();
     private IntPtr keyboardHook, mouseHook;
-    private IntPtr applicationWindow;
+    private Func<int, int, bool>? isStopRecordingTarget;
     private long lastEvent;
     private bool hasEvent;
+    private bool stopping;
     public event EventHandler<string>? StepRecorded;
     public bool IsRecording => keyboardHook != IntPtr.Zero;
     public MacroRecorder() { keyboardCallback = Keyboard; mouseCallback = Mouse; }
-    public void Start(IntPtr ownWindow)
+    public void Start(IntPtr ownWindow) => Start(ownWindow, null);
+    /// <param name="ownWindow">Retained for compatibility; the application window is not excluded.</param>
+    /// <param name="isStopRecordingTarget">Hit-tests the actual stop control using physical screen coordinates.</param>
+    public void Start(IntPtr ownWindow, Func<int, int, bool>? isStopRecordingTarget)
     {
-        if (IsRecording) return;
-        applicationWindow = ownWindow; heldKeys.Clear(); heldMouse.Clear(); lastEvent = 0; hasEvent = false;
+        if (IsRecording || stopping) return;
+        this.isStopRecordingTarget = isStopRecordingTarget;
+        heldKeys.Clear(); mouseFilter.Reset(); lastEvent = 0; hasEvent = false;
         keyboardHook = SetWindowsHookEx(13, keyboardCallback, GetModuleHandle(null), 0);
         mouseHook = SetWindowsHookEx(14, mouseCallback, GetModuleHandle(null), 0);
         if (keyboardHook == IntPtr.Zero || mouseHook == IntPtr.Zero)
@@ -33,40 +38,53 @@ public sealed class MacroRecorder : IDisposable
     }
     private IntPtr Keyboard(int code, IntPtr message, IntPtr data)
     {
-        if (code >= 0)
+        try
         {
-            var input = Marshal.PtrToStructure<KeyboardData>(data);
-            if ((input.Flags & 0x10) == 0 && KeyName(input.VirtualKey, input.ScanCode, input.Flags) is { } key)
+            if (code >= 0)
             {
-                var down = message.ToInt64() is 0x100 or 0x104;
-                var up = message.ToInt64() is 0x101 or 0x105;
-                if (down && heldKeys.Add(input.VirtualKey)) Record($"key {key} down");
-                else if (up && heldKeys.Remove(input.VirtualKey)) Record($"key {key} up");
+                var input = Marshal.PtrToStructure<KeyboardData>(data);
+                if ((input.Flags & 0x10) == 0 && KeyName(input.VirtualKey, input.ScanCode, input.Flags) is { } key)
+                {
+                    var down = message.ToInt64() is 0x100 or 0x104;
+                    var up = message.ToInt64() is 0x101 or 0x105;
+                    if (down && heldKeys.TryAdd(input.VirtualKey, key)) Record($"key {key} down");
+                    else if (up && heldKeys.Remove(input.VirtualKey, out var pressedKey)) Record($"key {pressedKey} up");
+                }
             }
         }
+        catch { /* Native hook callbacks must always return control to Windows. */ }
         return CallNextHookEx(keyboardHook, code, message, data);
     }
     private IntPtr Mouse(int code, IntPtr message, IntPtr data)
     {
-        if (code >= 0)
+        try
         {
-            var input = Marshal.PtrToStructure<MouseHookData>(data);
-            // Clicking the editor/Stop button is not a recorded action.
-            if ((input.Flags & 1) == 0 && GetAncestor(WindowFromPoint(input.Point), 2) != applicationWindow)
+            if (code >= 0)
             {
-                var msg = message.ToInt64();
-                var button = msg switch { 0x201 or 0x202 => 1, 0x204 or 0x205 => 2, 0x207 or 0x208 => 3, 0x20B or 0x20C => 3 + (int)(input.MouseData >> 16), _ => 0 };
-                if (button != 0)
+                var input = Marshal.PtrToStructure<MouseHookData>(data);
+                if ((input.Flags & 3) == 0)
                 {
-                    var down = msg is 0x201 or 0x204 or 0x207 or 0x20B;
-                    if (down && heldMouse.Add(button)) Record($"mouse {button} down");
-                    else if (!down && heldMouse.Remove(button)) Record($"mouse {button} up");
+                    var msg = message.ToInt64();
+                    var button = msg switch { 0x201 or 0x202 => 1, 0x204 or 0x205 => 2, 0x207 or 0x208 => 3, 0x20B or 0x20C => 3 + (int)(input.MouseData >> 16), _ => 0 };
+                    if (button != 0)
+                    {
+                        var down = msg is 0x201 or 0x204 or 0x207 or 0x20B;
+                        var stopTarget = down && IsStopTarget(input.Point);
+                        if (mouseFilter.ShouldRecordButton(button, down, injected: false, stopTarget))
+                            Record($"mouse {button} {(down ? "down" : "up")}");
+                    }
+                    else if (msg is 0x20A or 0x20E)
+                        Record($"{(msg == 0x20A ? "wheel" : "pan")} {Math.Clamp((short)(input.MouseData >> 16) / 120, -127, 127)}");
                 }
-                else if (msg is 0x20A or 0x20E)
-                    Record($"{(msg == 0x20A ? "wheel" : "pan")} {Math.Clamp((short)(input.MouseData >> 16) / 120, -127, 127)}");
             }
         }
+        catch { /* Recording never blocks or consumes physical mouse input. */ }
         return CallNextHookEx(mouseHook, code, message, data);
+    }
+    private bool IsStopTarget(Point point)
+    {
+        try { return isStopRecordingTarget?.Invoke(point.X, point.Y) == true; }
+        catch { return false; }
     }
     private void Record(string step)
     {
@@ -99,9 +117,21 @@ public sealed class MacroRecorder : IDisposable
     }
     public void Stop()
     {
-        if (keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(keyboardHook); keyboardHook = IntPtr.Zero; }
-        if (mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(mouseHook); mouseHook = IntPtr.Zero; }
-        timer.Stop();
+        if (stopping) return;
+        stopping = true;
+        try
+        {
+            if (keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(keyboardHook); keyboardHook = IntPtr.Zero; }
+            if (mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(mouseHook); mouseHook = IntPtr.Zero; }
+            var keys = heldKeys.OrderBy(pair => pair.Key).Select(pair => pair.Value).ToArray();
+            heldKeys.Clear();
+            var buttons = mouseFilter.ReleaseRecordedButtons();
+            isStopRecordingTarget = null;
+            // Finalize the recorded gesture, not physical input. A step handler may itself request Stop.
+            foreach (var key in keys) Record($"key {key} up");
+            foreach (var button in buttons) Record($"mouse {button} up");
+        }
+        finally { timer.Stop(); stopping = false; }
     }
     public void Dispose() => Stop();
     private delegate IntPtr HookCallback(int code, IntPtr message, IntPtr data);
@@ -111,7 +141,5 @@ public sealed class MacroRecorder : IDisposable
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int kind, HookCallback callback, IntPtr module, uint threadId);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool UnhookWindowsHookEx(IntPtr hook);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
-    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
-    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string? module);
 }

@@ -18,7 +18,7 @@ public partial class MainPageViewModel
     [ObservableProperty] public partial bool LightsyncRunning { get; set; }
     [ObservableProperty] public partial string SoftwareMacroStatus { get; set; } = "软件宏未启动";
     [ObservableProperty] public partial string MacroExecutionTrace { get; set; } = "可模拟按住 300 毫秒，查看点击 / 按住 / 松开的实际事件顺序；模拟不会发送系统输入。";
-    public bool CanChangeDevice => IsIdle && !HostMacrosRunning && !LightsyncRunning;
+    public bool CanChangeDevice => IsIdle && !HostMacrosRunning && !LightsyncRunning && !LuaRunning;
     public bool CanStartSoftware => CanEdit && IsEditingSoftware && !HostMacrosRunning;
     partial void OnHostMacrosRunningChanged(bool value) => UpdateCapabilities();
     partial void OnLightsyncRunningChanged(bool value) => UpdateCapabilities();
@@ -29,11 +29,13 @@ public partial class MainPageViewModel
         ShowError(error);
     });
     [RelayCommand]
-    private async Task StartSoftwareMacrosAsync() => await RunAsync(async () =>
+    private async Task StartSoftwareMacrosAsync() => await RunAsync(StartHostMacrosCoreAsync);
+    private async Task StartHostMacrosCoreAsync()
     {
         if (client is null || snapshot is null) throw new InvalidOperationException("请先读取设备。");
         if (IsEditingOnboard) throw new InvalidOperationException("板载配置由鼠标执行。请切换到软件配置后启动软件宏。");
         await StopHostMacrosCoreAsync();
+        await StopLuaCoreAsync();
         var bindings = new List<HostMacroBinding>();
         foreach (var row in AllBindings.Where(r => r.SelectedAction.Id == "macro"))
         {
@@ -51,7 +53,27 @@ public partial class MainPageViewModel
         SoftwareMacroStatus = $"运行中 · {bindings.Count} 个宏绑定 · 点击、按住与松开由鼠标真实按键触发";
         StatusTitle = "软件宏已启动"; Status = "关闭 G HUB 的设备控制可避免争用。点击“停止软件宏”会释放按键并恢复原映射。";
         await SaveSoftwareSettingsCoreAsync();
-    });
+    }
+    [RelayCommand]
+    private async Task UseSoftwareMacroConfigurationAsync()
+    {
+        var macro = SelectedMacro;
+        var targets = AllBindings.Where(b => b.SelectedAction.Id == "macro" && b.Value == macro?.Name)
+            .Select(b => (b.Index, b.GShift)).ToArray();
+        var software = Configurations.FirstOrDefault(c => !c.Onboard);
+        if (macro is null || software is null) return;
+        await SelectConfigurationAsync(software);
+        if (!IsEditingSoftware || HasError) return;
+        SelectedMacro = macro;
+        foreach (var (index, gshift) in targets)
+        {
+            MacroTarget = AllBindings.Single(b => b.Index == index && b.GShift == gshift);
+            BindMacroCommand.Execute(null);
+        }
+        StatusTitle = "已切换到软件配置";
+        Status = targets.Length == 0 ? "请在“板载与执行”中选择目标按键，点击“绑定到按键”，然后启动软件宏；退出软件会停止。"
+            : "触发宏按一次开始、再按一次停止。点击“板载与执行 → 启动软件宏”后生效；退出软件会停止。";
+    }
     private async Task StopHostMacrosCoreAsync()
     {
         var session = hostMacros; hostMacros = null;
@@ -83,6 +105,7 @@ public partial class MainPageViewModel
     public async Task StopRuntimeCoreAsync()
     {
         Exception? error = null;
+        try { await StopLuaCoreAsync(); } catch (Exception ex) { error = ex; }
         try { await StopLightsyncCoreAsync(); } catch (Exception ex) { error = ex; }
         try { await StopHostMacrosCoreAsync(); } catch (Exception ex) { error = error is null ? ex : new AggregateException(error, ex); }
         if (error is not null) throw error;
@@ -136,6 +159,15 @@ public partial class MainPageViewModel
     private sealed record SoftwareSettings(string DeviceIdentity, ushort Sector, SoftwareAssignment[] Bindings, Core.Lighting.LightingSettings Lighting);
     public async Task ShutdownAsync()
     {
-        try { await FlushImmediateSaveAsync(); shuttingDown = true; await StopRuntimeCoreAsync(); } finally { Dispose(); }
+        Exception? error = null;
+        try { await FlushImmediateSaveAsync(); }
+        catch (Exception failure) { error = failure; RecordDiagnosticContext("shutdown with unsaved board draft", failure); }
+        shuttingDown = true;
+        // Even a failed board save must stop software toggles and release held
+        // inputs before the HID connection is disposed.
+        try { await StopRuntimeCoreAsync(); }
+        catch (Exception failure) { error = error is null ? failure : new AggregateException(error, failure); }
+        finally { Dispose(); }
+        if (error is not null) throw error;
     }
 }

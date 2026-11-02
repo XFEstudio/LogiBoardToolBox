@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using LogiBoardToolBox.Core.Onboard;
+using LogiBoardToolBox.Core.Diagnostics;
 
 namespace LogiBoardToolBox.ViewModels;
 
@@ -21,6 +22,9 @@ public partial class MainPageViewModel
     [ObservableProperty] public partial string PersistenceStatus { get; set; } = "";
     public bool IsEditingOnboard => SelectedConfiguration?.Onboard == true;
     public bool IsEditingSoftware => !IsEditingOnboard;
+    public bool CanRetryOnboardSave => IsIdle && IsEditingOnboard && HasSnapshot;
+    private bool refreshBeforeRetry;
+    private bool userRequestedRetry;
     private ImmediateSaveQueue? immediateSave;
     private int suppressSave;
     private bool shuttingDown;
@@ -35,7 +39,7 @@ public partial class MainPageViewModel
     private void InitializeImmediateSave()
     {
         immediateSave = new(CommitImmediateAsync);
-        immediateSave.Failed += (_, error) => { PersistenceStatus = "保存失败 · 更改仍保留在编辑器中"; ShowError(error); };
+        immediateSave.Failed += (_, error) => { refreshBeforeRetry = true; PersistenceStatus = "保存失败 · 更改仍保留在编辑器中"; ShowError(error); };
         PropertyChanged += SaveWorkspaceChanged;
         DpiStages.CollectionChanged += (_, _) => ObserveSaveRows();
         StandardBindings.CollectionChanged += (_, _) => ObserveSaveRows();
@@ -63,21 +67,35 @@ public partial class MainPageViewModel
     private void SaveRowChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (sender is DpiStageEditor && e.PropertyName is nameof(DpiStageEditor.Value) or nameof(DpiStageEditor.ValueY) or nameof(DpiStageEditor.Enabled) or nameof(DpiStageEditor.LinkAxes)
-            || sender is ButtonBindingEditor && e.PropertyName is nameof(ButtonBindingEditor.SelectedAction) or nameof(ButtonBindingEditor.Value)) RequestImmediateSave();
+            || sender is ButtonBindingEditor && e.PropertyName is nameof(ButtonBindingEditor.SelectedAction) or nameof(ButtonBindingEditor.Value))
+        {
+            if (suppressSave == 0)
+                DiagnosticLog.Record("edit", e.PropertyName ?? "row", sender is DpiStageEditor d
+                    ? (object)new { d.Index, d.Value, d.ValueY, d.Enabled, d.LinkAxes }
+                    : sender is ButtonBindingEditor b ? new { b.Index, b.GShift, Action = b.SelectedAction.Id, b.Value } : null);
+            RequestImmediateSave();
+        }
     }
     private void SaveWorkspaceChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ProfileName) or nameof(ProfileEnabled) or nameof(DefaultDpi) or nameof(ShiftDpi) or nameof(SelectedRate) or nameof(SelectedWirelessRate) or nameof(PowerSaveSeconds) or nameof(PowerOffSeconds)) RequestImmediateSave();
+        if (e.PropertyName is nameof(ProfileName) or nameof(ProfileEnabled) or nameof(DefaultDpi) or nameof(ShiftDpi) or nameof(SelectedRate) or nameof(SelectedWirelessRate) or nameof(PowerSaveSeconds) or nameof(PowerOffSeconds))
+        {
+            if (suppressSave == 0) DiagnosticLog.Record("edit", e.PropertyName, new { ProfileName, ProfileEnabled, DefaultDpi, ShiftDpi, Rate = SelectedRate?.Id, WirelessRate = SelectedWirelessRate?.Id, PowerSaveSeconds, PowerOffSeconds });
+            RequestImmediateSave();
+        }
     }
     public void RequestImmediateSave()
     {
-        if (Utilities.UiVerification.IsRequested && !Utilities.UiVerification.HardwareWritesEnabled || suppressSave != 0 || refreshingProfiles || shuttingDown || !HasSnapshot || !IsEditingOnboard) return;
+        if (Utilities.UiVerification.IsRequested && !Utilities.UiVerification.HardwareWritesEnabled && verificationStorage is null || suppressSave != 0 || refreshingProfiles || shuttingDown || !HasSnapshot || !IsEditingOnboard) return;
         PersistenceStatus = "正在保存更改…"; immediateSave?.Request();
     }
     partial void OnSelectedConfigurationChanged(ConfigurationChoice? value)
     {
         OnPropertyChanged(nameof(IsEditingOnboard)); OnPropertyChanged(nameof(IsEditingSoftware));
+        OnPropertyChanged(nameof(CanRetryOnboardSave));
+        OnPropertyChanged(nameof(MacroTypeDescription)); OnPropertyChanged(nameof(ShowSoftwareToggleHint)); OnPropertyChanged(nameof(ShowNativeToggleHint));
         PersistenceStatus = value?.Onboard == true ? "板载配置 · 修改后自动保存" : "软件配置";
+        RefreshProfileRouteLabels();
     }
     private void RebuildConfigurations()
     {
@@ -86,10 +104,13 @@ public partial class MainPageViewModel
         SelectedConfiguration = Configurations.FirstOrDefault(c => c.Onboard && snapshot?.Mode == 1 && c.Sector == snapshot.ActiveSector) ?? Configurations[0];
         AllowExperimental = IsEditingOnboard && IsExperimental;
         OnPropertyChanged(nameof(Configurations)); OnPropertyChanged(nameof(SelectedConfiguration));
+        RefreshProfilePairChoices();
     }
     public async Task SelectConfigurationAsync(ConfigurationChoice choice)
     {
         if (SelectedConfiguration?.Key == choice.Key || IsBusy) return;
+        if (choice.Onboard && ProfilePairActive && CurrentProfileRoute is { } route && choice.Sector != route.FirstProfile && choice.Sector != route.SecondProfile)
+        { ShowError(new InvalidOperationException("双配置直达期间仅启用两个所选槽位。请先解除直达，再启用其他槽位。")); return; }
         try { await FlushImmediateSaveAsync(); } catch (IOException error) { ShowError(error); return; }
         await RunAsync(async () =>
         {
@@ -104,6 +125,7 @@ public partial class MainPageViewModel
             try { SelectedProfile = target; }
             finally { refreshingProfiles = false; }
             SelectedConfiguration = Configurations.Single(c => c.Key == choice.Key);
+            if (!choice.Onboard) MatchStoredMacros(forSoftware: true);
             if (!choice.Onboard && softwareWorkspaceDraft is { } software)
             {
                 drafts[choice.Sector] = software; RestoreDraft(choice.Sector); drafts.Clear();
@@ -135,6 +157,36 @@ public partial class MainPageViewModel
         });
     }
     public async Task FlushImmediateSaveAsync() { if (immediateSave is not null) await immediateSave.FlushAsync(); }
+
+    public async Task RetryOnboardSaveAsync()
+    {
+        if (!CanRetryOnboardSave) return;
+        refreshBeforeRetry = true;
+        userRequestedRetry = true;
+        DiagnosticLog.Record("workspace", "retry onboard save requested");
+        RequestImmediateSave();
+        try { await FlushImmediateSaveAsync(); }
+        catch (Exception error) { DiagnosticLog.Record("workspace", "retry onboard save failed", error: error); }
+    }
+
+    private async Task RefreshSnapshotKeepingEditsAsync(bool allowProfileRebase = false)
+    {
+        if (memory is null || snapshot is null) throw new InvalidOperationException("请先读取设备。");
+        PersistenceStatus = "正在重新读取板载数据 · 保留编辑内容…";
+        var fresh = await memory.ReadAsync();
+        if (fresh.DeviceIdentity != snapshot.DeviceIdentity || !fresh.Description.Take(11).SequenceEqual(snapshot.Description.Take(11)))
+            throw new InvalidOperationException("设备或板载布局已改变，请先导出诊断包再重新选择设备。");
+        // A transient macro read must not silently override a concurrent G HUB
+        // profile edit. An explicit Retry applies the draft the user can see.
+        if (!allowProfileRebase && snapshot.Sectors.Any(p => p.Key <= snapshot.Capabilities.ProfileCount
+            && SectorChecksum.IsValid(p.Value) && (!fresh.Sectors.TryGetValue(p.Key, out var bytes) || !bytes.SequenceEqual(p.Value))))
+            throw new InvalidOperationException("读取后鼠标配置被其他程序修改，编辑内容已保留；确认当前编辑内容后可点“重试板载保存”。");
+        var current = fresh.GetProfiles().Single(p => p.Sector == SelectedProfile!.Sector);
+        using var scope = PauseImmediateSave();
+        foreach (var row in AllBindings) row.RefreshOriginal(current.GetBinding(row.Index, row.GShift));
+        snapshot = fresh; refreshBeforeRetry = false;
+        RecordDiagnosticContext("refreshed snapshot with edits retained");
+    }
     private async Task CommitImmediateAsync()
     {
         while (IsBusy && !shuttingDown) await Task.Delay(25);
@@ -146,14 +198,46 @@ public partial class MainPageViewModel
     }
     private async Task CommitImmediateCoreAsync()
     {
-        var plan = PrepareWrite();
-        if (plan.Changes.Count == 0) { PersistenceStatus = "已保存到板载"; return; }
+        if (refreshBeforeRetry)
+        {
+            var allowRebase = userRequestedRetry; userRequestedRetry = false;
+            await RefreshSnapshotKeepingEditsAsync(allowRebase);
+        }
+        MemoryWritePlan plan;
+        try { plan = PrepareWrite(); }
+        catch (MacroStorageException error)
+        {
+            // Only planning failed, so no flash transaction has started. Re-read
+            // once without clearing drafts; a transient/stale sector can recover.
+            DiagnosticLog.Record("workspace", "macro storage recovery read", error: error);
+            await RefreshSnapshotKeepingEditsAsync();
+            try { plan = PrepareWrite(); }
+            catch (MacroStorageException)
+            {
+                var backups = new List<MemorySnapshot>();
+                if (Directory.Exists(BackupDirectory) && (File.GetAttributes(BackupDirectory) & FileAttributes.ReparsePoint) == 0)
+                    foreach (var path in Directory.GetFiles(BackupDirectory, "*.json"))
+                    {
+                        try
+                        {
+                            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) continue;
+                            backups.Add(await OnboardMemory.LoadBackupAsync(path));
+                        }
+                        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+                        { DiagnosticLog.Record("memory-recovery", "backup unavailable", new { path }, failure); }
+                    }
+                plan = PrepareWrite(backups);
+            }
+        }
+        if (plan.Changes.Count == 0) { PersistenceStatus = "已保存到板载"; await SaveOnboardMacroLinksAsync(); return; }
         await StopRuntimeCoreAsync();
         PersistenceStatus = "正在写入并校验…";
         var result = await memory!.CommitAsync(plan, BackupDirectory);
         LastBackupPath = result.BackupPath;
         snapshot = await memory.ReadAsync();
         using var scope = PauseImmediateSave();
+        var currentProfile = snapshot.GetProfiles().Single(p => p.Sector == SelectedProfile!.Sector);
+        foreach (var row in AllBindings) row.RefreshOriginal(currentProfile.GetBinding(row.Index, row.GShift));
         foreach (var profile in snapshot.GetProfiles())
         {
             var existing = Profiles.FirstOrDefault(p => p.Sector == profile.Sector);
@@ -166,6 +250,8 @@ public partial class MainPageViewModel
         ModeSummary = $"板载模式 · 活动配置 {snapshot.ActiveSector}";
         StatusTitle = "板载配置已自动保存";
         Status = $"写入并校验 {result.SectorsWritten} 个扇区。";
+        await SaveOnboardMacroLinksAsync();
+        RefreshProfileRouteLabels();
         UpdateCapabilities(); Log(Status);
     }
 }

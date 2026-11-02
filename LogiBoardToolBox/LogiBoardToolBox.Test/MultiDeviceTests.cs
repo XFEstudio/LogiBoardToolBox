@@ -20,7 +20,7 @@ public class MultiDeviceTests
         Assert.Equal("GPW", MouseCatalog.Resolve([0xC539], "Logitech G Pro Wireless Gaming Mouse").Id);
         Assert.Equal("Superlight", MouseCatalog.Resolve([0x4093], "PRO WIRELESS").Id);
         Assert.Equal("G305", MouseCatalog.Resolve([], "G304 LIGHTSPEED").Id);
-        Assert.Equal(false, MouseCatalog.Resolve([], "PRO X SUPERLIGHT 2").IsKnown);
+        Assert.Equal("Superlight2", MouseCatalog.Resolve([], "PRO X SUPERLIGHT 2").Id);
         Assert.Equal(false, MouseCatalog.Resolve([0xC547], "Unrecognized mouse").IsKnown);
         Assert.Equal(false, MouseCatalog.ById("Superlight")!.HasLighting);
         Assert.Equal(false, MouseCatalog.ById("G305")!.HasLighting);
@@ -32,7 +32,8 @@ public class MultiDeviceTests
     [Test]
     public void CatalogNamespacesAndBindingsAreUniqueAndGpwSidesAreNotG502Sides()
     {
-        Assert.Equal(MouseCatalog.Models.Count, MouseCatalog.Models.Select(m => m.SlotPrefix).Distinct().Count());
+        var importable = MouseCatalog.Models.Where(m => !string.IsNullOrEmpty(m.SlotPrefix)).ToArray();
+        Assert.Equal(importable.Length, importable.Select(m => m.SlotPrefix).Distinct().Count());
         foreach (var model in MouseCatalog.Models)
         {
             Assert.Equal(model.Id, MouseCatalog.Resolve(model.ProductIds, model.DisplayName).Id);
@@ -49,7 +50,7 @@ public class MultiDeviceTests
     [Test]
     public void GHubImportsUseEachModelsNamespaceAndPreserveEveryRecordedDelay()
     {
-        foreach (var model in MouseCatalog.Models)
+        foreach (var model in MouseCatalog.Models.Where(m => !string.IsNullOrEmpty(m.SlotPrefix)))
         {
             var import = GHubMacroImport.Read(ImportedJson(model.SlotPrefix,"g4"),model.SlotPrefix);
             Assert.Equal(model.SlotPrefix, import.DeviceKey); Assert.Equal(3,import.Bindings.Single().ButtonIndex);
@@ -76,7 +77,7 @@ public class MultiDeviceTests
             using var fake=new FakeMouse(original); using var client=new HidPlusPlusClient(fake,1);
             var memory=new OnboardMemory(client,original.DeviceIdentity,original.DeviceName);
             var before=await memory.ReadAsync(); var profile=before.GetProfiles()[0].Copy();
-            var macro=GHubMacroImport.Read(ImportedJson(model.SlotPrefix,"g4"),model.SlotPrefix).Bindings.Single().Compiled;
+            var macro=string.IsNullOrEmpty(model.SlotPrefix) ? MacroCompiler.Compile("tap A") : GHubMacroImport.Read(ImportedJson(model.SlotPrefix,"g4"),model.SlotPrefix).Bindings.Single().Compiled;
             var plan=MemoryWritePlan.Create(before,profile,[new(3,false,macro)],before.Capabilities.IsExperimental);
             using var scratch=new ScratchDirectory(); await memory.CommitAsync(plan,scratch.Path);
             var after=await memory.ReadAsync(); var binding=after.GetProfiles()[0].GetBinding(3);

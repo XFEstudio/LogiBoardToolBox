@@ -23,6 +23,17 @@ internal static partial class UiVerification
         GetWindowThreadProcessId(GetForegroundWindow(),out var foregroundStart);
         try
         {
+            if(args.Contains("--lua-profile-only"))
+            {
+                await VerifyLuaProfileUpdateAsync(page,tabs,Capture,Check);
+                Check("no-unhandled-ui-errors",CatalogUnhandledErrors.Count==0,string.Join("\n",CatalogUnhandledErrors));
+                await SaveResult(true,null);return;
+            }
+            if(args.Contains("--native-toggle-only"))
+            {
+                await VerifyToggleAsync(page,tabs,Capture,Check);
+                await SaveResult(true,null);return;
+            }
             foreach(var model in MouseCatalog.Models)
             {
                 vm.LoadCatalogVerificationFixture(model);tabs.SelectedIndex=0;
@@ -30,6 +41,8 @@ internal static partial class UiVerification
                 Check(model.Id+"-lighting-capability",vm.HasRgbLighting==model.HasLighting,model.LightingZoneCount.ToString());
                 await Capture(model.Id+"-assignments");
             }
+            await VerifyLegacyAndBindingLabelsAsync(page,tabs,Capture,Check);
+            await VerifyToggleAsync(page,tabs,Capture,Check);
             vm.LoadCatalogVerificationFixture(MouseCatalog.ById("GPW")!);tabs.SelectedIndex=0;
             vm.ShowGShift=true;await Capture("GPW-gshift");vm.ShowGShift=false;
             await VerifyMacroSaveAsync(page,tabs,Capture,Check);
@@ -47,6 +60,8 @@ internal static partial class UiVerification
             Check("GPW-animation-two-colors",vm.AnimationFrames.All(f=>f.Colors.Length==2),"The editor uses two colors per frame.");
             Invoke(page,"animation-cancel");
             tabs.SelectedIndex=4;await Capture("GPW-settings");
+            await VerifyDiagnosticsAsync(page,tabs,Capture,Check);
+            await VerifyLuaWorkspaceAsync(page,tabs,Capture,Check);
             vm.LoadCatalogVerificationFixture(MouseCatalog.ById("Superlight")!);tabs.SelectedIndex=0;
             Check("device-switch-clears-prior-bindings",vm.StandardBindings.Count==5 && vm.StandardBindings.All(b=>b.Index<5),"GPW right-side and bottom buttons are absent on SUPERLIGHT.");
             Check("non-rgb-model-hides-lightsync",Tree(page).OfType<Button>().Single(b=>b.Name=="LightsyncNav").Visibility==Visibility.Collapsed,"SUPERLIGHT has no LIGHTSYNC navigation.");
@@ -79,7 +94,7 @@ internal static partial class UiVerification
                 return new{Type=e.GetType().Name,e.Name,Text=text,rect.X,rect.Y,rect.Width,rect.Height};
             }).Where(e=>!string.IsNullOrWhiteSpace(e.Text)).ToArray();
             var images=Tree(page).OfType<Image>().Select(i=>new{i.Name,Source=(i.Source as BitmapImage)?.UriSource?.ToString(),Visibility=i.Visibility.ToString()}).ToArray();
-            await File.WriteAllTextAsync(Path.Combine(OutputDirectory,name+".layout.json"),JsonSerializer.Serialize(new{Model=vm.DeviceModel.Id,SimulatedDeviceData=true,Width=bitmap.PixelWidth,Height=bitmap.PixelHeight,Images=images,Nodes=nodes},new JsonSerializerOptions{WriteIndented=true}));
+            await File.WriteAllTextAsync(Path.Combine(OutputDirectory,name+".layout.json"),JsonSerializer.Serialize(new{Model=vm.DeviceModel.Id,SimulatedDeviceData=true,vm.IsBusy,vm.IsIdle,MacroEditors=Tree(page).OfType<MacroEditorView>().Select(e=>new{e.IsEnabled,e.Opacity}).ToArray(),Width=bitmap.PixelWidth,Height=bitmap.PixelHeight,Images=images,Nodes=nodes},new JsonSerializerOptions{WriteIndented=true}));
         }
     }
 }

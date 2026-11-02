@@ -403,5 +403,126 @@
       "按键 G11"
     ],
     "LightingZoneCount": 2
+  },
+  {
+    "Id": "Pro2",
+    "GHubModelId": "pro_2_wireless_mouse",
+    "SlotPrefix": "",
+    "DisplayName": "PRO 2 LIGHTSPEED",
+    "Aliases": [
+      "PRO 2 LIGHTSPEED",
+      "G PRO 2 LIGHTSPEED",
+      "PRO 2 Wireless",
+      "GPW4朱雀",
+      "GPW4 朱雀",
+      "GPW 4 朱雀"
+    ],
+    "ProductIds": [
+      49306,
+      16552
+    ],
+    "ImageAsset": "",
+    "ImageAspect": 0.516,
+    "Layout": "Ambidextrous",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "左侧后退 · G4",
+      "左侧前进 · G5",
+      "底部 DPI · G6",
+      "右侧后退 · G7",
+      "右侧前进 · G8"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "Superlight2",
+    "GHubModelId": "pro_x_2_wireless_mouse",
+    "SlotPrefix": "",
+    "DisplayName": "PRO X SUPERLIGHT 2 / SE",
+    "Aliases": [
+      "PRO X SUPERLIGHT 2",
+      "G PRO X SUPERLIGHT 2",
+      "PRO X SUPERLIGHT 2 SE",
+      "G PRO X SUPERLIGHT 2 SE",
+      "GPW3",
+      "GPW3 龙鳞",
+      "GPW2金刚",
+      "GPW2 金刚",
+      "GPW 2 金刚",
+      "GPW2金刚版",
+      "GPW2 金刚版"
+    ],
+    "ProductIds": [
+      49307,
+      16553
+    ],
+    "ImageAsset": "",
+    "ImageAspect": 0.504,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5"
+    ],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "Superlight2Dex",
+    "GHubModelId": "pro_x_r_wireless_mouse",
+    "SlotPrefix": "",
+    "DisplayName": "PRO X SUPERLIGHT 2 DEX",
+    "Aliases": [
+      "PRO X SUPERLIGHT 2 DEX",
+      "G PRO X SUPERLIGHT 2 DEX",
+      "GPW4鹰眼",
+      "GPW4 鹰眼"
+    ],
+    "ProductIds": [
+      49312,
+      16568
+    ],
+    "ImageAsset": "",
+    "ImageAspect": 0.53,
+    "Layout": "Compact",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5"
+    ],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G402",
+    "GHubModelId": "g402",
+    "SlotPrefix": "g402",
+    "DisplayName": "G402",
+    "Aliases": [
+      "G402",
+      "G402 Hyperion Fury",
+      "G402 HYPERION FURY Gaming Mouse"
+    ],
+    "ProductIds": [
+      49278
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G402.png",
+    "ImageAspect": 0.516,
+    "Layout": "Extended",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "前进 · G5",
+      "DPI Shift · G6",
+      "DPI 减少 · G7",
+      "DPI 增加 · G8"
+    ],
+    "LightingZoneCount": 1
   }
 ]

@@ -44,17 +44,21 @@ namespace LogiBoardToolBox.ViewModels
         [RelayCommand]
         private async Task ExportLog()
         {
-            var savePicker = new FileSavePicker();
-            InitializeWithWindow.Initialize(savePicker, WindowNative.GetWindowHandle(App.MainWindow));
-            savePicker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
-            savePicker.FileTypeChoices.Add(new("日志文件", [".log"]));
-            savePicker.SuggestedFileName = $"{(IsStartDateTimeEnable ? StartDateTime.ToString("yyyy年MM月dd日_HH时mm分ss秒") : "~")}至{(IsEndDateTimeEnable ? EndDateTime.ToString("yyyy年MM月dd日_HH时mm分ss秒") : DateTime.Now.ToString("yyyy年MM月dd日_HH时mm分ss秒"))}-日志文件.log";
-            savePicker.DefaultFileExtension = ".log";
-            if (await savePicker.PickSaveFileAsync() is { } file)
+            try
             {
-                XFEConsole.Log.Export().WriteIn(file.Path);
-                Console.WriteLine($"日志已导出至: {file.Path}");
+                if (Utilities.UiVerification.IsRequested) throw new InvalidOperationException("后台验收不打开系统文件对话框。");
+                var savePicker = new FileSavePicker();
+                InitializeWithWindow.Initialize(savePicker, WindowNative.GetWindowHandle(App.MainWindow));
+                savePicker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+                savePicker.FileTypeChoices.Add(new("完整诊断包", [".zip"]));
+                savePicker.SuggestedFileName = $"LogiBoard-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}";
+                savePicker.DefaultFileExtension = ".zip";
+                if (await savePicker.PickSaveFileAsync() is not { } file) return;
+                var captureIssues = await Services.DiagnosticScreenshot.CaptureAsync();
+                await App.MouseWorkspace.ExportDiagnosticsAsync(file.Path, captureIssues);
+                Console.WriteLine($"完整诊断包已导出至: {file.Path}");
             }
+            catch (Exception error) { App.MouseWorkspace.ShowError(error); }
         }
 
         [RelayCommand]

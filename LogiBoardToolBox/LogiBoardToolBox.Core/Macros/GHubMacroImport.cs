@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using LogiBoardToolBox.Core.Devices;
+using LogiBoardToolBox.Core.Onboard;
 
 namespace LogiBoardToolBox.Core.Macros;
 
@@ -13,7 +14,7 @@ public sealed record GHubMacroImport(string ProfileId, string ProfileName, strin
     IReadOnlyList<GHubMacroBinding> Bindings)
 {
     /// <summary>Imports assigned sequence macros only. Other profile fields remain on the mouse.</summary>
-    public static GHubMacroImport Read(string json, string deviceKey = "g502x-plus")
+    public static GHubMacroImport Read(string json, string deviceKey = "g502x-plus", OnboardCapabilities? capabilities = null)
     {
         if (json.Length > 8 * 1024 * 1024) throw new InvalidDataException("G HUB 配置文件过大。");
         var model = MouseCatalog.BySlotPrefix(deviceKey) ?? throw new NotSupportedException("此型号尚未核对 G HUB 按键槽位，不能直接导入。");
@@ -59,7 +60,7 @@ public sealed record GHubMacroImport(string ProfileId, string ProfileName, strin
                 throw new NotSupportedException($"宏“{name}”包含额外的按下/松开片段，不能丢弃片段后导入。");
             // G HUB serializes actual delay components. defaultDelay is editor metadata;
             // adding a uniform delay would change recorded down/up and inter-click timings.
-            var compiled = MacroCompiler.CompileProgram(press, repeat, hold, release).ToOnboard();
+            var compiled = MacroCompiler.CompileProgram(press, repeat, hold, release).ToOnboard(capabilities);
             var color = macro.TryGetProperty("color", out var c) ? Text(c, "hex") : "#00A5DB";
             bindings.Add(new(slot, index, match.Groups[2].Success, cardId, name, press, repeat, hold, release,
                 color, delays.ToArray(), compiled));

@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using LogiBoardToolBox.Core.Macros;
+using LogiBoardToolBox.Core.Diagnostics;
 
 namespace LogiBoardToolBox.Core.HidPlusPlus;
 
@@ -32,6 +33,7 @@ public sealed class HostMacroSession(HidPlusPlusClient client, IMacroInputSink i
         if (assignments.Any(a => a.GShift) && shiftButton < 0) throw new InvalidOperationException("请先为普通层分配 G-Shift 按键。");
         if (assignments.Any(a => a.Button == shiftButton)) throw new InvalidOperationException("G-Shift 切换键不能同时作为软件宏触发键。");
         bindings = assignments.ToArray(); gshiftButton = shiftButton;
+        DiagnosticLog.Record("host-macros", "starting", new { client.DiagnosticId, shiftButton, Bindings = assignments.Select(a => new { a.Button, a.GShift, a.Program.Repeat }).ToArray() });
         previousMap = (await client.FeatureAsync(0x8110, 3, ct: ct).ConfigureAwait(false)).Take(count).ToArray();
         if (previousMap.Length != count) throw new InvalidDataException("原始鼠标映射回复不完整。");
         runtime.Faulted += (_, error) => Faulted?.Invoke(this, error);
@@ -44,13 +46,17 @@ public sealed class HostMacroSession(HidPlusPlusClient client, IMacroInputSink i
             await client.FeatureAsync(0x8110, 4, map, ct).ConfigureAwait(false);
             await client.FeatureAsync(0x8110, 1, ct: ct).ConfigureAwait(false);
             processing = Task.Run(ProcessAsync);
+            DiagnosticLog.Record("host-macros", "started", new { client.DiagnosticId });
         }
         catch { await DisposeAsync().ConfigureAwait(false); throw; }
     }
     private void OnNotification(object? sender, HidNotification message)
     {
         if (message.FeatureIndex == spyIndex && message.Function == 0 && message.Data.Length >= 2)
+        {
+            DiagnosticLog.Record("host-macros", "button mask", new { client.DiagnosticId, Mask = Convert.ToHexString(message.Data.AsSpan(0, 2)) });
             masks.Writer.TryWrite((ushort)((message.Data[0] << 8) | message.Data[1]));
+        }
     }
     private void OnDisconnected(object? sender, Exception error)
     {
@@ -84,6 +90,7 @@ public sealed class HostMacroSession(HidPlusPlusClient client, IMacroInputSink i
     public async ValueTask DisposeAsync()
     {
         if (disposed) return; disposed = true;
+        DiagnosticLog.Record("host-macros", "stopping", new { client.DiagnosticId });
         client.Notification -= OnNotification; client.Disconnected -= OnDisconnected;
         lifetime.Cancel(); masks.Writer.TryComplete();
         if (processing is not null) await processing.ConfigureAwait(false);
@@ -97,5 +104,6 @@ public sealed class HostMacroSession(HidPlusPlusClient client, IMacroInputSink i
             await client.FeatureAsync(0x8110, 4, map, recovery.Token).ConfigureAwait(false);
         }
         finally { previousMap = null; if (ownsMode) { ownsMode = false; await hostMode.ReleaseAsync(recovery.Token).ConfigureAwait(false); } }
+        DiagnosticLog.Record("host-macros", "stopped; original map restored", new { client.DiagnosticId });
     }
 }

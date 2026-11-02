@@ -18,6 +18,8 @@ public static class SectorChecksum
     public static bool IsValid(ReadOnlySpan<byte> sector) => sector.Length > 2 &&
         BinaryPrimitives.ReadUInt16BigEndian(sector[^2..]) == Compute(sector[..^2]);
 
+    public static bool IsErased(ReadOnlySpan<byte> sector) => sector.Length > 2 && sector.IndexOfAnyExcept((byte)0xFF) < 0;
+
     public static byte[] Seal(byte[] sector)
     {
         if (sector.Length < 3) throw new ArgumentException("扇区长度不足。", nameof(sector));

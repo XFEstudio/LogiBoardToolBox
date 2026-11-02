@@ -6,6 +6,7 @@ using LogiBoardToolBox.Core.HidPlusPlus;
 using LogiBoardToolBox.Core.Macros;
 using LogiBoardToolBox.Core.Onboard;
 using LogiBoardToolBox.Core.Windows;
+using LogiBoardToolBox.Core.Diagnostics;
 
 namespace LogiBoardToolBox.ViewModels;
 
@@ -65,17 +66,20 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
     public bool CanChangeMode => IsIdle && HasSnapshot;
     public MainPageViewModel()
     {
+        InitializeDiagnostics();
         InitializeMacroTimeline();
         InitializeLightsync();
         SelectedRate = ReportRates[^1]; Macros.Add(new()); SelectedMacro = Macros[0];
         InitializeAssignmentPalette();
         InitializeImmediateSave();
+        LuaBoardTrigger = LuaBoardTriggers[0];
     }
     public async Task InitializeAsync()
     {
         if (initialized) return;
         initialized = true;
         ReadSensitivityPresets();
+        ReadLuaSettings();
         ReadAnimationLibrary();
         var path = Path.Combine(dataDirectory, "macros.json");
         if (File.Exists(path)) await RunAsync(async () =>
@@ -100,7 +104,7 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
         if (SelectedDevice is not null && !HasSnapshot) await ReadAsync();
     }
     partial void OnIsBusyChanged(bool value) => UpdateCapabilities();
-    partial void OnAllowExperimentalChanged(bool value) => OnPropertyChanged(nameof(CanWrite));
+    partial void OnAllowExperimentalChanged(bool value) => UpdateCapabilities();
     partial void OnShowGShiftChanged(bool value)
     {
         OnPropertyChanged(nameof(VisibleBindings));
@@ -108,6 +112,7 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
     }
     partial void OnSelectedDeviceChanged(LogitechDevice? value)
     {
+        DiagnosticLog.Record("workspace", "device selected", value);
         if (snapshotDeviceIdentity == value?.Identity) return;
         using var saveScope = PauseImmediateSave();
         // Clearing the previous software profile must not recreate its draft under slot 1
@@ -117,6 +122,7 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
         {
         client?.Dispose(); client = null; memory = null; snapshot = null; snapshotDeviceIdentity = null;
         hostMode = null; performance = null; sensor = null;
+        onboardMacroLinks = [];
         advanced = null; lightingCapabilities = null; OnPropertyChanged(nameof(AdvancedState));
         HasLightforce = false; HasHeroCalibration = false; HasStartupEffect = false;
         softwareWorkspaceDraft = null; softwareWorkspaceLighting = null;
@@ -145,7 +151,7 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
                 StandardBindings.Add(new(i, false, name, value.GetBinding(i)));
                 if (snapshot.Capabilities.HasGShift) ShiftBindings.Add(new(i, true, name, value.GetBinding(i, true)));
             }
-            MatchStoredMacros();
+            MatchStoredMacros(forSoftware: snapshot.Mode != 1);
             for (var i = 0; i < 4; i++) Lighting.Add(new(i, value.GetLighting(i)));
             LoadLightsync(value);
             RestoreDraft(value.Sector);
@@ -153,44 +159,26 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
         }
         OnPropertyChanged(nameof(VisibleBindings)); OnPropertyChanged(nameof(AllBindings)); UpdateCapabilities();
         RefreshAssignmentPalette();
+        RefreshProfileRouteLabels();
         SelectedButton = VisibleBindings.FirstOrDefault();
-    }
-    private void MatchStoredMacros()
-    {
-        if (snapshot is null) return;
-        var known = new List<(string Name, byte[] Bytes)>();
-        foreach (var macro in Macros)
-        {
-            try { known.Add((macro.Name, macro.Compile().Bytes)); }
-            catch (Exception error) when (error is FormatException or NotSupportedException or ArgumentException or OverflowException) { }
-        }
-        foreach (var row in AllBindings.Where(row => ButtonBinding.IsMacro(row.Original)))
-        {
-            try
-            {
-                var bytes = MacroAllocator.ReadMacroBytes(snapshot, new(ButtonBinding.MacroSector(row.Original), ButtonBinding.MacroOffset(row.Original)));
-                var matches = known.Where(m => m.Bytes.SequenceEqual(bytes)).ToArray();
-                if (matches.Length != 1 || Macros.Count(m => m.Name == matches[0].Name) != 1) continue;
-                row.SelectedAction = ButtonBindingEditor.ActionChoices.First(c => c.Id == "macro");
-                row.Value = matches[0].Name; row.FriendlyName = matches[0].Name;
-            }
-            catch (InvalidDataException) { /* Preserve unknown firmware bytecode as its original binding. */ }
-        }
     }
     private void UpdateCapabilities()
     {
-        foreach (var name in new[] { nameof(IsIdle), nameof(HasSnapshot), nameof(OnboardMode), nameof(CanEdit), nameof(CanEditPerformance), nameof(CanEditLighting), nameof(HasGShift), nameof(IsExperimental), nameof(CanWrite), nameof(CanApplyPerformance), nameof(CanChangeDevice), nameof(CanStartSoftware) }) OnPropertyChanged(name);
+        foreach (var name in new[] { nameof(IsIdle), nameof(HasSnapshot), nameof(OnboardMode), nameof(CanEdit), nameof(CanEditPerformance), nameof(CanEditLighting), nameof(HasGShift), nameof(IsExperimental), nameof(CanWrite), nameof(CanApplyPerformance), nameof(CanChangeDevice), nameof(CanStartSoftware), nameof(CanRetryOnboardSave), nameof(CanConfigureProfilePair), nameof(CanRemoveProfilePair), nameof(CanChangeProfileEnabled) }) OnPropertyChanged(name);
         OnPropertyChanged(nameof(OnboardModeText));
         OnPropertyChanged(nameof(CanChangeMode));
+        OnPropertyChanged(nameof(MacroTypeDescription)); OnPropertyChanged(nameof(ShowSoftwareToggleHint)); OnPropertyChanged(nameof(ShowNativeToggleHint));
     }
     private void Log(string text)
     {
         Console.WriteLine(text); Activity.Insert(0, $"{DateTime.Now:HH:mm:ss}  {text}");
+        DiagnosticLog.Record("activity", text);
         while (Activity.Count > 120) Activity.RemoveAt(Activity.Count - 1);
     }
     public void ShowError(Exception ex)
     {
         HasError = true; StatusTitle = "操作未完成"; Status = ex.Message; Log(ex.Message);
+        RecordDiagnosticContext("operation failed", ex);
     }
     public async Task RunAsync(Func<Task> operation)
     {
@@ -207,13 +195,13 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
         await RunAsync(async () =>
     {
         StatusTitle = "扫描设备"; Status = "正在枚举罗技 HID++ 接口，请保持鼠标唤醒…";
-        var devices = await Task.Run(() => LogitechDiscovery.FindAsync());
+        var devices = await Task.Run(() => LogitechDiscovery.FindAsync(message => DiagnosticLog.Record("discovery", message)));
         var old = SelectedDevice?.Identity;
         Devices.Clear(); foreach (var device in devices) Devices.Add(device);
         SelectedDevice = Devices.FirstOrDefault(d => d.Identity == old) ?? Devices.FirstOrDefault();
         StatusTitle = devices.Count == 0 ? "未发现鼠标" : "设备已连接";
         Status = devices.Count == 0 ? "请检查接收器或 USB 连接，移动鼠标后重新扫描。" : "选择设备并点击“读取板载”。";
-        Log($"发现 {devices.Count} 个支持板载配置的设备。");
+        Log($"发现 {devices.Count} 个罗技鼠标；板载能力将在读取后显示。");
         if (SelectedDevice is not null) await ReadCoreAsync();
         });
     }
@@ -234,15 +222,25 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
         var device = SelectedDevice ?? throw new InvalidOperationException("请先选择设备。");
         client?.Dispose(); client = LogitechDiscovery.Open(device);
         hostMode = new(client);
+        if (!device.HasOnboardProfiles)
+        {
+            memory = null; snapshot = null; snapshotDeviceIdentity = null;
+            DeviceSummary = "已识别设备；未返回 0x8100 板载配置功能。";
+            ModeSummary = "板载读写不可用";
+            CapabilityNote = "设备保留在列表中。软件 Lua 可独立启用；板载读写须以此设备实际返回的功能为准。";
+            StatusTitle = "设备已识别"; Status = CapabilityNote; NotifyDeviceModel(); UpdateCapabilities(); return;
+        }
         memory = new(client, device.Identity, device.Name); StatusTitle = "读取板载存储";
         var read = await memory.ReadAsync(new Progress<string>(message => Status = message));
         snapshot = read; snapshotDeviceIdentity = device.Identity;
+        await LoadOnboardMacroLinksAsync();
         var caps = read.Capabilities;
         DeviceSummary = caps.Summary;
         ModeSummary = read.Mode == 1 ? $"板载模式 · 活动配置 {read.ActiveSector}" : "主机模式 · 当前由软件控制";
         CapabilityNote = caps.IsExperimental
             ? "此鼠标使用格式 10。匹配已识别布局后，支持按键、五档双轴 DPI、双连接回报率及格式 1 宏的实验性板载写入。选择板载配置后自动保存、备份并读回校验。灯效和 G-Shift 以设备能力为准。"
-            : caps.CanEditProfiles ? "支持板载 DPI、回报率和按键；G-Shift、灯效、宏空间以此鼠标的实际能力为准。选择板载配置后修改自动保存，逐扇区读回校验。Lua、应用识别及音画同步需要主机。"
+            : caps.UsesAdvancedProfile ? "已适配格式 7 的双轴 DPI、回报率、按键和宏布局；抬升距离与未知字段原样保留。板载灯效暂未开放，此型号硬件宏输出仍待实机验证。"
+            : caps.CanEditProfiles ? "支持板载 DPI、回报率和按键；G-Shift、灯效、宏空间以此鼠标的实际能力为准。选择板载配置后修改自动保存，逐扇区读回校验。完整 Lua、应用识别及音画同步需要主机。"
             : "此板载布局尚未适配，当前仅提供读取与原始备份。";
         await ReadPerformanceAsync();
         await ReadDeviceStatusAsync();
@@ -258,7 +256,7 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
         Status = $"已读取 {read.Sectors.Count} 个扇区；{read.ReadErrors.Count} 个读取错误。选择板载配置后，有效修改会自动保存并读回校验。";
         Log($"{device.Name} · {caps.Summary}"); UpdateCapabilities();
     }
-    public MemoryWritePlan PrepareWrite()
+    public MemoryWritePlan PrepareWrite(IReadOnlyList<MemorySnapshot>? recoveryBackups = null)
     {
         if (snapshot is null || SelectedProfile is null || memory is null) throw new InvalidOperationException("请先读取板载存储。");
         var profile = snapshot.GetProfiles().Single(p => p.Sector == SelectedProfile.Sector).Copy(); profile.Name = ProfileName.Trim(); profile.Enabled = ProfileEnabled;
@@ -275,12 +273,17 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
                 if (row.SelectedAction.Id != "macro") continue;
                 var matches = Macros.Where(m => m.Name == row.Value.Trim()).ToArray();
                 if (matches.Length != 1) throw new FormatException("宏名称不存在或重名，请检查宏库。");
-                assignments.Add(new(row.Index, row.GShift, matches[0].Compile()));
+                assignments.Add(new(row.Index, row.GShift, matches[0].Compile(snapshot.Capabilities)));
             }
             catch (Exception ex) { throw new FormatException($"{row}：{ex.Message}", ex); }
         }
         ApplyLightsyncToProfile(profile);
-        return MemoryWritePlan.Create(snapshot, profile, assignments, AllowExperimental);
+        if (IsEditingOnboard && CurrentProfileRoute is { } route) ProfileSwitchPlanner.ValidateDraft(route, snapshot, profile);
+        RecordDiagnosticContext("prepare write");
+        var plan = recoveryBackups is null ? MemoryWritePlan.Create(snapshot, profile, assignments, AllowExperimental)
+            : MemoryWritePlan.CreateRecoveringMacroCrc(snapshot, profile, assignments, recoveryBackups, AllowExperimental);
+        DiagnosticLog.Record("workspace", "prepared write plan", plan);
+        return plan;
     }
     public async Task CommitAsync(MemoryWritePlan plan) => await RunAsync(async () =>
     {
@@ -328,7 +331,7 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
             var program = macro.CompileProgram();
             try
             {
-                var compiled = program.ToOnboard();
+                var compiled = program.ToOnboard(snapshot?.Capabilities);
                 MacroPreview = $"软件执行：{program.InstructionCount} 条步骤，通过检查。\n板载编译：{compiled.Length} 字节\n{Convert.ToHexString(compiled.Bytes)}\n长宏自动分配跳转链。";
             }
             catch (NotSupportedException ex) { MacroPreview = $"软件执行：{program.InstructionCount} 条步骤，通过检查。\n板载限制：{ex.Message}"; }
@@ -341,8 +344,10 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
         try
         {
             var target = MacroTarget ?? throw new InvalidOperationException("请先选择目标按键。");
+            EnsureProfileRouteEditable(target);
             var macro = SelectedMacro ?? throw new InvalidOperationException("请先选择宏。");
             _ = macro.CompileProgram();
+            if (IsEditingOnboard) _ = macro.Compile(snapshot?.Capabilities);
             if (string.IsNullOrWhiteSpace(macro.Name)) throw new FormatException("宏名称不能为空。");
             target.SelectedAction = ButtonBindingEditor.ActionChoices.Single(c => c.Id == "macro"); target.Value = macro.Name;
             StatusTitle = "宏已分配"; Status = $"{macro.Name} → {target}。可启动软件宏，或预览板载写入兼容性。";
@@ -357,13 +362,21 @@ public partial class MainPageViewModel : ViewModelBase, IDisposable
         {
             _ = macro.CompileProgram();
         }
+        // Validate before persisting the library. A failed board conversion must
+        // not save Toggle in the library while leaving a WhileHeld macro on the mouse.
+        if (IsEditingOnboard)
+            foreach (var row in AllBindings.Where(r => r.SelectedAction.Id == "macro"))
+                _ = Macros.Single(m => m.Name == row.Value).Compile(snapshot?.Capabilities);
+        var restartSoftware = IsEditingSoftware && HostMacrosRunning;
+        if (restartSoftware) await StopHostMacrosCoreAsync();
         Directory.CreateDirectory(dataDirectory);
         var path = Path.Combine(dataDirectory, "macros.json");
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(Macros.Select(m => new SavedMacro(m.Name, m.Script, m.Repeat, m.HoldScript, m.ReleaseScript, m.UseStandardDelay, m.StandardDelay, m.ShowUpDown, m.Color)), new JsonSerializerOptions { WriteIndented = true }));
         StatusTitle = "宏库已保存"; Status = path;
         RefreshAssignmentPalette();
         RequestImmediateSave();
+        if (restartSoftware) await StartHostMacrosCoreAsync();
     });
     private sealed record SavedMacro(string Name, string Script, MacroRepeat Repeat, string HoldScript = "", string ReleaseScript = "", bool UseStandardDelay = false, string StandardDelay = "50", bool ShowUpDown = true, string Color = "#00A5DB");
-    public void Dispose() { client?.Dispose(); }
+    public void Dispose() { _ = StopLuaCoreAsync(); client?.Dispose(); }
 }

@@ -40,13 +40,13 @@ public sealed class MemorySnapshot
         {
             var entry = directory.FirstOrDefault(e => e.Sector == slot);
             if (entry.Sector != 0 && Sectors.TryGetValue(slot, out var raw) && SectorChecksum.IsValid(raw))
-                profiles.Add(new(slot, entry.Enabled, raw));
+                profiles.Add(new(slot, entry.Enabled, raw, profileFormat: caps.ProfileFormat));
             else
             {
                 var factorySector = 0x100 + Math.Min(slot, caps.FactoryProfileCount);
                 if (caps.FactoryProfileCount == 0 || !Sectors.TryGetValue(factorySector, out var factory) || !SectorChecksum.IsValid(factory))
                     throw new InvalidDataException($"配置 {slot} 和对应出厂配置均无法读取；请先用 OMM 初始化板载配置。");
-                profiles.Add(new(slot, directory.Count == 0 ? slot == 1 : entry.Enabled, factory, fromFactory: true));
+                profiles.Add(new(slot, directory.Count == 0 ? slot == 1 : entry.Enabled, factory, fromFactory: true, profileFormat: caps.ProfileFormat));
             }
         }
         return profiles;

@@ -31,7 +31,7 @@ public static class MouseCatalog
             ?? throw new InvalidOperationException("鼠标型号目录缺失。");
         return JsonSerializer.Deserialize<MouseModel[]>(stream) ?? throw new InvalidDataException("鼠标型号目录无效。");
     }
-    public static MouseModel? BySlotPrefix(string prefix) => Models.SingleOrDefault(m => m.SlotPrefix == prefix);
+    public static MouseModel? BySlotPrefix(string prefix) => string.IsNullOrWhiteSpace(prefix) ? null : Models.SingleOrDefault(m => m.SlotPrefix == prefix);
     public static MouseModel? ById(string id) => Models.SingleOrDefault(m => m.Id == id);
     public static MouseModel Resolve(IEnumerable<ushort> transportProductIds, string name)
     {
@@ -45,7 +45,7 @@ public static class MouseCatalog
     }
     private static string Normalize(string text)
     {
-        var value = Regex.Replace(text.ToUpperInvariant(), @"\b(LOGITECH|GAMING|MOUSE)\b", " ");
+        var value = Regex.Replace(text.ToUpperInvariant(), @"\b(LOGITECH|GAMING|MOUSE)\b|罗技", " ");
         return Regex.Replace(value, @"\s+", " ").Trim();
     }
     public static IReadOnlyList<ushort> ReadTransportProductIds(ReadOnlySpan<byte> firmwareInfo)

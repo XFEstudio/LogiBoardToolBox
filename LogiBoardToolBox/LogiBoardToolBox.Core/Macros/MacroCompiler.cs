@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Globalization;
+using LogiBoardToolBox.Core.Onboard;
 
 namespace LogiBoardToolBox.Core.Macros;
 
@@ -13,13 +14,17 @@ public sealed record CompiledMacro(IReadOnlyList<byte[]> Instructions, MacroRepe
 /// <summary>Compiles into macro format 1 bytecode executed by the mouse firmware.</summary>
 public static class MacroCompiler
 {
-    public static CompiledMacro Compile(string script, MacroRepeat repeat = MacroRepeat.Once)
+    public const string OnboardToggleUnavailable = "触发宏需要再次按同一按键停止；当前板载协议尚未实现这一取消机制。不能把持续循环指令当成触发宏写入，也不会改成按住循环。请在软件配置中使用触发宏。";
+
+    public static CompiledMacro Compile(string script, MacroRepeat repeat = MacroRepeat.Once, OnboardCapabilities? capabilities = null)
     {
         if (!Enum.IsDefined(repeat)) throw new ArgumentOutOfRangeException(nameof(repeat));
         if (repeat == MacroRepeat.Sequence) throw new NotSupportedException("请使用 CompileProgram 提供序列的点击、按住和松开片段。");
+        if (repeat == MacroRepeat.Toggle && capabilities?.SupportsNativeToggle != true) throw new NotSupportedException(OnboardToggleUnavailable);
         var output = Parse(script, new HashSet<string>());
         if (output.Count == 0) throw new FormatException("请先添加宏步骤。");
-        if (repeat != MacroRepeat.Once) output.Add([(byte)(repeat == MacroRepeat.WhileHeld ? 2 : 3)]);
+        if (repeat == MacroRepeat.WhileHeld) output.Add([2]);
+        if (repeat == MacroRepeat.Toggle) output.Add([3]);
         output.Add([0xFF]);
         return new(output, repeat);
     }

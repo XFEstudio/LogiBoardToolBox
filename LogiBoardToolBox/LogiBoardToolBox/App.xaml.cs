@@ -36,11 +36,13 @@ namespace LogiBoardToolBox
             PageManager.RegisterPage(typeof(SettingPage));
             UnhandledException += App_UnhandledException;
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+            TaskScheduler.UnobservedTaskException += (_, error) => Core.Diagnostics.DiagnosticLog.Record("unhandled", "background task", error: error.Exception);
         }
 
         private static void CurrentDomain_UnhandledException(object sender, System.UnhandledExceptionEventArgs e)
         {
             if (e.ExceptionObject is not Exception ex) return;
+            Core.Diagnostics.DiagnosticLog.Record("unhandled", "AppDomain", error: ex);
             Console.WriteLine($"[ERROR]应用程序发生错误:{ex.Message}");
             Console.WriteLine($"[TRACE]{ex.StackTrace}");
             if (ServiceManager.GetService<IMessageService>() is not { } messageService) return;
@@ -49,6 +51,7 @@ namespace LogiBoardToolBox
 
         private static void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
         {
+            Core.Diagnostics.DiagnosticLog.Record("unhandled", "WinUI", error: e.Exception);
             if (UiVerification.IsCatalogRequested) UiVerification.CatalogUnhandledErrors.Add(e.Exception.ToString());
             Console.WriteLine($"[ERROR]应用程序发生错误:{e.Message}");
             Console.WriteLine($"[TRACE]{e.Exception.StackTrace}");

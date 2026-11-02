@@ -9,6 +9,8 @@ public partial class MainPageViewModel
 {
     private LightsyncCapabilities? lightingCapabilities;
     public MouseModel DeviceModel => SelectedDevice?.Model ?? MouseCatalog.Unknown;
+    public string DeviceConnectionText => Utilities.UiVerification.IsCatalogRequested ? "离线模拟设备"
+        : SelectedDevice is null ? "未连接" : SelectedDevice.DeviceIndex == 0xFF ? "USB 有线连接" : "LIGHTSPEED 接收器";
     public string DeviceImageAsset => DeviceModel.ImageAsset;
     private MouseModel? imageModel;
     private ImageSource? modelImage;
@@ -17,7 +19,7 @@ public partial class MainPageViewModel
         get
         {
             var model = DeviceModel;
-            if (!model.IsKnown) return null;
+            if (!model.IsKnown || string.IsNullOrWhiteSpace(model.ImageAsset)) return null;
             if (!ReferenceEquals(imageModel, model))
             { modelImage = new BitmapImage(new Uri("ms-appx:///" + model.ImageAsset.TrimStart('/'))); imageModel = model; }
             return modelImage;
@@ -31,7 +33,7 @@ public partial class MainPageViewModel
     public IEnumerable<EditorChoice> AvailableLightsyncEffects => LightsyncEffects.Where(e => e.Id != "Signature" || DeviceModel.Layout == "G502X");
     private void NotifyDeviceModel()
     {
-        foreach (var property in new[] { nameof(DeviceModel), nameof(DeviceImageAsset), nameof(DeviceImageSource), nameof(HasModelSideView), nameof(HasRgbLighting), nameof(ModelSupportNote), nameof(AvailableLightsyncEffects) }) OnPropertyChanged(property);
+        foreach (var property in new[] { nameof(DeviceModel), nameof(DeviceConnectionText), nameof(DeviceImageAsset), nameof(DeviceImageSource), nameof(HasModelSideView), nameof(HasRgbLighting), nameof(ModelSupportNote), nameof(AvailableLightsyncEffects) }) OnPropertyChanged(property);
         OnPropertyChanged(nameof(LedZones));
         RefreshLightsyncBindings();
     }

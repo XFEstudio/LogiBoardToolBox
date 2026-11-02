@@ -25,6 +25,7 @@ internal sealed class FakeMouse : IHidTransport
     internal bool FailSpyStop { get; set; }
     internal byte[] SpyMap { get; private set; } = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0];
     internal List<byte[]> Requests { get; } = [];
+    internal Func<int, int, byte[], byte[]>? ReadTransform { get; set; }
     public int InputReportLength => 20;
     public int OutputReportLength => 20;
     internal FakeMouse(MemorySnapshot snapshot)
@@ -75,7 +76,8 @@ internal sealed class FakeMouse : IHidTransport
                     var sector = (request[4] << 8) | request[5]; var offset = (request[6] << 8) | request[7];
                     ReadOffsets.Add(offset);
                     if (!Sectors.TryGetValue(sector, out var data) || offset + 16 > data.Length) Error(reply, request, 2);
-                    else data.AsSpan(offset, 16).CopyTo(reply.AsSpan(4));
+                    else (ReadTransform?.Invoke(sector, offset, data.AsSpan(offset, 16).ToArray())
+                        ?? data.AsSpan(offset, 16).ToArray()).CopyTo(reply, 4);
                     break;
                 case 6:
                     WriteStarts++; writingSector = (request[4] << 8) | request[5]; writingSize = (request[8] << 8) | request[9]; writingData.Clear(); break;
