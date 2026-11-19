@@ -37,6 +37,11 @@ public sealed partial class LightsyncMapView : UserControl
         OriginalModel.Visibility = original ? Visibility.Visible : Visibility.Collapsed;
         var hasImage = model.IsKnown && !string.IsNullOrWhiteSpace(model.ImageAsset);
         CatalogImage.Visibility = !original && hasImage ? Visibility.Visible : Visibility.Collapsed;
+        if (original && hasImage)
+        {
+            var uri = new Uri("ms-appx:///" + model.ImageAsset.TrimStart('/'));
+            if (OriginalModelImage.Source is not BitmapImage bitmap || bitmap.UriSource != uri) OriginalModelImage.Source = new BitmapImage(uri);
+        }
         if (Zones is not IEnumerable<LedZoneEditor> source) return;
         if (!original)
         {

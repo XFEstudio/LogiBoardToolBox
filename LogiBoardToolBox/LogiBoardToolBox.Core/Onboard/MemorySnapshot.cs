@@ -14,7 +14,23 @@ public sealed class MemorySnapshot
     public ushort ActiveSector { get; set; }
     public Dictionary<int, byte[]> Sectors { get; set; } = [];
     public Dictionary<int, string> ReadErrors { get; set; } = [];
+    public HashSet<int> RejectedSectorAddresses { get; set; } = [];
     [System.Text.Json.Serialization.JsonIgnore] public OnboardCapabilities Capabilities => OnboardCapabilities.Parse(Description);
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int WritableSectorCount
+    {
+        get
+        {
+            var caps = Capabilities;
+            return caps.HasG305StorageGeometry && RejectedSectorAddresses.SetEquals([3, 4, 5]) &&
+                Enumerable.Range(0, 3).All(s => Sectors.TryGetValue(s, out var data) && data.Length == caps.SectorSize) &&
+                Enumerable.Range(3, 3).All(s => !Sectors.ContainsKey(s) && ReadErrors.ContainsKey(s))
+                ? 3 : caps.SectorCount;
+        }
+    }
+
+    internal bool HasWritableReadErrors => ReadErrors.Keys.Any(s => s < WritableSectorCount);
 
     public static IReadOnlyList<(ushort Sector, bool Enabled)> ParseDirectory(byte[] bytes, int maxProfiles)
     {

@@ -33,7 +33,7 @@ public partial class MainPageViewModel
             try
             {
                 if (File.Exists(ProfileRoutesPath) && new FileInfo(ProfileRoutesPath).Length <= 1024 * 1024)
-                    profileRoutes = JsonSerializer.Deserialize<Dictionary<string, ProfilePairRoute>>(File.ReadAllText(ProfileRoutesPath)) ?? new(StringComparer.Ordinal);
+                    profileRoutes = JsonSerializer.Deserialize(File.ReadAllText(ProfileRoutesPath), LogiBoardToolBox.Profiles.ProfileJsonContext.Default.ProfileRoutes) ?? new(StringComparer.Ordinal);
             }
             catch (Exception error) { Log("直达配置记录读取失败：" + error.Message); }
         }
@@ -119,7 +119,7 @@ public partial class MainPageViewModel
             RebuildConfigurations();
         }
         Directory.CreateDirectory(dataDirectory);
-        try { await File.WriteAllTextAsync(ProfileRoutesPath, JsonSerializer.Serialize(profileRoutes, new JsonSerializerOptions { WriteIndented = true })); }
+        try { await File.WriteAllTextAsync(ProfileRoutesPath, JsonSerializer.Serialize(profileRoutes, LogiBoardToolBox.Profiles.ProfileJsonContext.Default.ProfileRoutes)); }
         catch (Exception error) { throw new IOException($"板载已写入且读回一致，但本机恢复记录保存失败。自动备份位于 {LastBackupPath}。", error); }
         PairStatus = route is null ? "双配置直达已解除；原按键和槽位启用状态已恢复，其他后续修改保留。" : PairStatus;
         PersistenceStatus = "已保存到板载 · 读回一致";

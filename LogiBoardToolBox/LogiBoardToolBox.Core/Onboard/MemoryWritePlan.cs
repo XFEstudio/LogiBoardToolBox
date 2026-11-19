@@ -1,4 +1,5 @@
 using LogiBoardToolBox.Core.Diagnostics;
+using LogiBoardToolBox.Core.Lighting;
 
 namespace LogiBoardToolBox.Core.Onboard;
 
@@ -11,7 +12,8 @@ public sealed record MemoryWritePlan(MemorySnapshot Baseline, IReadOnlyList<Sect
     /// <summary>Repairs only CRC bytes proven by an identity-matched valid backup.
     /// Every payload byte must still match; changed or missing macro data is never guessed.</summary>
     public static MemoryWritePlan CreateRecoveringMacroCrc(MemorySnapshot snapshot, MouseProfile draft,
-        IReadOnlyList<MacroAssignment> macros, IEnumerable<MemorySnapshot> backups, bool allowExperimental = false)
+        IReadOnlyList<MacroAssignment> macros, IEnumerable<MemorySnapshot> backups, bool allowExperimental = false,
+        (LightsyncCapabilities Device, LightingSettings Preset)? activeRgb = null)
     {
         var caps = snapshot.Capabilities;
         var verified = backups.Where(b => MemorySnapshot.IsKnownFormat(b.Format) && b.DeviceIdentity == snapshot.DeviceIdentity
@@ -19,13 +21,14 @@ public sealed record MemoryWritePlan(MemorySnapshot Baseline, IReadOnlyList<Sect
         var repaired = new MemorySnapshot { Format = snapshot.Format, CreatedAt = snapshot.CreatedAt,
             DeviceIdentity = snapshot.DeviceIdentity, DeviceName = snapshot.DeviceName, Description = (byte[])snapshot.Description.Clone(),
             Mode = snapshot.Mode, ActiveSector = snapshot.ActiveSector,
-            ReadErrors = new(snapshot.ReadErrors), Sectors = snapshot.Sectors.ToDictionary(p => p.Key, p => (byte[])p.Value.Clone()) };
+            ReadErrors = new(snapshot.ReadErrors), RejectedSectorAddresses = new(snapshot.RejectedSectorAddresses),
+            Sectors = snapshot.Sectors.ToDictionary(p => p.Key, p => (byte[])p.Value.Clone()) };
         var repairs = new List<SectorChange>();
         while (true)
         {
             try
             {
-                var plan = Create(repaired, draft, macros, allowExperimental);
+                var plan = Create(repaired, draft, macros, allowExperimental, activeRgb);
                 if (repairs.Count == 0) return plan;
                 var summary = $"已从内容完全匹配的有效备份恢复 {repairs.Count} 个宏扇区的 CRC；宏动作与延迟未改变。\n" + BuildSummary(snapshot, draft, macros, repairs.Count + plan.Changes.Count);
                 var result = new MemoryWritePlan(snapshot, repairs.Concat(plan.Changes).ToArray(), plan.ActivateSector, summary);
@@ -54,31 +57,35 @@ public sealed record MemoryWritePlan(MemorySnapshot Baseline, IReadOnlyList<Sect
         }
     }
 
-    public static MemoryWritePlan Create(MemorySnapshot snapshot, MouseProfile draft, IReadOnlyList<MacroAssignment> macros, bool allowExperimental = false)
+    public static MemoryWritePlan Create(MemorySnapshot snapshot, MouseProfile draft, IReadOnlyList<MacroAssignment> macros,
+        bool allowExperimental = false, (LightsyncCapabilities Device, LightingSettings Preset)? activeRgb = null)
     {
         var caps = snapshot.Capabilities;
         if (!caps.CanEditProfiles) throw new NotSupportedException("未知板载格式，仅允许备份。");
         if (caps.IsExperimental && !allowExperimental) throw new NotSupportedException("这只鼠标使用尚未完成实机写入验证的格式 10。请先阅读设备页说明，再决定是否启用实验性按键/宏写入。");
-        if (snapshot.ReadErrors.Keys.Any(i => i < caps.SectorCount))
+        if (snapshot.HasWritableReadErrors)
             throw new InvalidOperationException("部分可写扇区未能完整备份，请重新读取设备后再写入。");
         var profiles = snapshot.GetProfiles();
         var working = draft.Copy();
         if (caps.UsesAdvancedProfile)
         {
-            var original = profiles.Single(p => p.Sector == working.Sector).ToBytes();
+            var originalProfile = profiles.Single(p => p.Sector == working.Sector);
+            var original = originalProfile.ToBytes();
             var candidate = working.ToBytes();
+            var newStageLod = originalProfile.GetNewDpiStageLod();
             for (var offset = 0; offset < candidate.Length - 2; offset++)
             {
                 var known = offset is < 29 or >= 44 and < 96 or >= 112 and < 208;
                 if (!known && candidate[offset] != original[offset])
                     throw new InvalidOperationException("格式 7 的未知字段必须原样保留。");
-                if (offset is < 8 or > 28 || (offset - 8) % 5 != 0 || candidate[offset] == original[offset]) continue;
+                if (offset is < 8 or > 28 || (offset - 8) % 5 != 0) continue;
                 var stage = (offset - 8) / 5;
                 var oldX = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(4 + stage * 5));
                 var newX = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(candidate.AsSpan(4 + stage * 5));
-                // Only enabling/disabling a stage may change its LOD validity marker.
-                // An ordinary DPI/name/button edit must never rewrite active LOD values.
-                if (!(newX == 0 && candidate[offset] == 0 || oldX == 0 && original[offset] == 0 && newX is > 0 and < 65535 && candidate[offset] == 2))
+                var expectedLod = original[offset];
+                if (newX == 0) expectedLod = 0;
+                else if (oldX == 0 && original[offset] == 0) expectedLod = newStageLod;
+                if (candidate[offset] != expectedLod)
                     throw new InvalidOperationException("修改配置时必须保留格式 7 原有的抬升距离。");
             }
         }
@@ -94,6 +101,9 @@ public sealed record MemoryWritePlan(MemorySnapshot Baseline, IReadOnlyList<Sect
                     throw new InvalidOperationException("格式 10 的未知字段必须原样保留。");
             }
         }
+        // Apply the typed RGB edit after checking that the draft retained all other format-7 bytes.
+        if (activeRgb is { } lighting)
+            OnboardLighting.ApplyActiveRgbPreset(working, caps, lighting.Device, lighting.Preset);
         var directory = MemorySnapshot.ParseDirectory(snapshot.Sectors[0], caps.ProfileCount);
         if (directory.Any(e => e.Sector > caps.ProfileCount))
             throw new NotSupportedException("检测到非常规配置目录，当前版本仅允许备份此布局。");
@@ -104,7 +114,7 @@ public sealed record MemoryWritePlan(MemorySnapshot Baseline, IReadOnlyList<Sect
         void Add(int sector, byte[] after, string purpose)
         {
             if (!snapshot.Sectors.TryGetValue(sector, out var before)) throw new InvalidDataException($"缺少扇区 {sector} 的原始备份。");
-            if (sector < 0 || sector >= caps.SectorCount || sector >= 0x100 || !caps.IsValidSectorWrite(sector, after))
+            if (sector < 0 || sector >= snapshot.WritableSectorCount || sector >= 0x100 || !caps.IsValidSectorWrite(sector, after))
                 throw new InvalidDataException("写入计划包含无效扇区。");
             if (!before.SequenceEqual(after)) changes.Add(new(sector, (byte[])before.Clone(), (byte[])after.Clone(), purpose));
         }
@@ -147,15 +157,18 @@ public sealed record MemoryWritePlan(MemorySnapshot Baseline, IReadOnlyList<Sect
         var caps = baseline.Capabilities;
         if (caps.IsExperimental && !allowExperimental) throw new NotSupportedException("格式 10 的恢复也需要启用实验性写入。");
         if (!MemorySnapshot.IsKnownFormat(backup.Format) || backup.DeviceIdentity != baseline.DeviceIdentity ||
-            !backup.Description.Take(11).SequenceEqual(baseline.Description.Take(11)) || backup.Capabilities.SupportsNativeToggle && !caps.SupportsNativeToggle)
+            !backup.Description.Take(11).SequenceEqual(baseline.Description.Take(11)) || backup.Capabilities.SupportsNativeToggle && !caps.SupportsNativeToggle ||
+            backup.Capabilities.SupportsNativeLua && !caps.SupportsNativeLua)
             throw new InvalidDataException("备份不属于当前鼠标，或板载布局与当前固件不一致。");
-        if (!caps.CanEditProfiles || baseline.ReadErrors.Keys.Any(s => s < caps.SectorCount))
+        if (!caps.CanEditProfiles || baseline.HasWritableReadErrors)
             throw new InvalidDataException("当前设备未能完整备份，不能恢复。");
         if (!backup.Sectors.TryGetValue(0, out var dir) || dir.Length != caps.SectorSize ||
             MemorySnapshot.ParseDirectory(dir, caps.ProfileCount).Count == 0)
             throw new InvalidDataException("备份没有有效的用户配置目录，不能作为完整配置恢复。");
         if (backup.Sectors.Any(p => p.Key < 0 || p.Value is null || p.Value.Length != caps.SectorSize))
             throw new InvalidDataException("备份包含无效的扇区数据。");
+        if (backup.Sectors.Keys.Any(s => s < caps.SectorCount && !baseline.Sectors.ContainsKey(s)))
+            throw new InvalidDataException("当前设备无法访问备份中的全部扇区，请重新读取设备后再恢复。");
         _ = MacroAllocator.FindReferencedSectors(backup);
         var changes = backup.Sectors.Where(p => p.Key < caps.SectorCount && caps.IsValidSectorWrite(p.Key, p.Value, allowErased: true))
             .OrderBy(p => p.Value.All(b => b == 0xFF) ? 3 : p.Key == 0 ? 2 : p.Key <= caps.ProfileCount ? 1 : 0).ThenBy(p => p.Key)

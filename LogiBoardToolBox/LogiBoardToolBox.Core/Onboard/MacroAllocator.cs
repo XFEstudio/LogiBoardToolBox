@@ -51,7 +51,7 @@ public static partial class MacroAllocator
                     if (offset < 0 || offset >= usable) throw new InvalidDataException("现有宏的地址超出扇区。");
                     var opcode = data[offset];
                     if (opcode == 0xFF) { Reserve(1); terminated = true; break; }
-                    var length = opcode == 0x60 ? snapshot.Capabilities.MacroJumpSize : MacroCompiler.InstructionSize(opcode);
+                    var length = opcode == 0x60 ? snapshot.Capabilities.MacroJumpSize : MacroCompiler.InstructionSize(opcode, snapshot.Capabilities);
                     if (offset + length > usable) { Reserve(usable - offset); sector++; offset = 0; continue; }
                     Reserve(length);
                     if (opcode == 0x60) { (sector, offset) = JumpTarget(snapshot.Capabilities, data, offset); continue; }
@@ -88,7 +88,7 @@ public static partial class MacroAllocator
                 throw new InvalidDataException("宏地址无效或扇区校验失败。");
             var opcode = data[offset];
             if (opcode == 0xFF) { bytes.Add(0xFF); return bytes.ToArray(); }
-            var size = opcode == 0x60 ? snapshot.Capabilities.MacroJumpSize : MacroCompiler.InstructionSize(opcode);
+            var size = opcode == 0x60 ? snapshot.Capabilities.MacroJumpSize : MacroCompiler.InstructionSize(opcode, snapshot.Capabilities);
             if (offset + size > usable) { sector++; offset = 0; continue; }
             if (opcode == 0x60) { (sector, offset) = JumpTarget(snapshot.Capabilities, data, offset); continue; }
             bytes.AddRange(data.AsSpan(offset, size).ToArray()); offset += size;

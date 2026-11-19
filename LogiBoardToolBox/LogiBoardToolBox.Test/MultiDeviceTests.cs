@@ -37,7 +37,7 @@ public class MultiDeviceTests
         foreach (var model in MouseCatalog.Models)
         {
             Assert.Equal(model.Id, MouseCatalog.Resolve(model.ProductIds, model.DisplayName).Id);
-            for (var i = 0; i < model.ButtonNames.Length && i < (model.Id == "G502XPlus" ? 11 : 16); i++)
+            for (var i = 0; i < model.ButtonNames.Length && i < (model.Layout == "G502X" ? 11 : 16); i++)
             { Assert.Equal(true, model.TryGetButtonIndex("g" + (i+1), out var index)); Assert.Equal(i,index); }
         }
         var gpw = MouseCatalog.ById("GPW")!;
@@ -71,7 +71,9 @@ public class MultiDeviceTests
             var original=Fixture.Create(model.Layout=="G502X"?(byte)10:(byte)3);
             // Deliberately vary capacity. These are simulated geometries, not claimed hardware dumps.
             var count=(byte)(model.Id=="G305"?1:model.Layout=="Compact"?3:5);
-            original.Description[3]=count; original.Description[5]=(byte)(model.Layout=="G502X"?11:model.ButtonNames.Length);
+            // Identity/artwork-only entries deliberately have no claimed button
+            // count; exercise those with an arbitrary six-button simulator.
+            original.Description[3]=count; original.Description[5]=(byte)(model.Layout=="G502X"?11:model.ButtonNames.Length==0?6:model.ButtonNames.Length);
             original.Sectors[0][4*count]=0xFF;original.Sectors[0][4*count+1]=0xFF;SectorChecksum.Seal(original.Sectors[0]);
             original.DeviceName=model.DisplayName;
             using var fake=new FakeMouse(original); using var client=new HidPlusPlusClient(fake,1);

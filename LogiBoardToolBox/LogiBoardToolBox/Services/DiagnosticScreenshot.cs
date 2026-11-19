@@ -40,7 +40,7 @@ internal static class DiagnosticScreenshot
                 Committed = e is Controls.CommitTextBox field ? field.Value : null,
                 Error = e is Controls.CommitTextBox input ? input.ErrorText : null
             }).ToArray();
-            await File.WriteAllTextAsync(Path.ChangeExtension(path, ".json"), JsonSerializer.Serialize(new { Capture = "App visual tree", Controls = controls }));
+            await File.WriteAllTextAsync(Path.ChangeExtension(path, ".json"), Core.Diagnostics.DiagnosticJson.Serialize(new { Capture = "App visual tree", Controls = controls }));
             DiagnosticLog.Record("diagnostics", "app visual tree captured", new { path, bitmap.PixelWidth, bitmap.PixelHeight, DesktopCapture = false });
             return [];
         }

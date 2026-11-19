@@ -4,9 +4,10 @@ using LogiBoardToolBox.Core.Onboard;
 
 namespace LogiBoardToolBox.Core.Macros;
 
-public enum MacroRepeat { Once, WhileHeld, Toggle, Sequence }
+public enum MacroRepeat { Once, WhileHeld, Toggle, Sequence, Continuous }
 public sealed record CompiledMacro(IReadOnlyList<byte[]> Instructions, MacroRepeat Repeat)
 {
+    public bool UsesNativeLua => Instructions.Any(i => i.Length > 0 && i[0] is 4 or 5 or 6 or 7 or 0x62);
     public byte[] Bytes => Instructions.SelectMany(x => x).ToArray();
     public int Length => Instructions.Sum(x => x.Length);
 }
@@ -21,15 +22,27 @@ public static class MacroCompiler
         if (!Enum.IsDefined(repeat)) throw new ArgumentOutOfRangeException(nameof(repeat));
         if (repeat == MacroRepeat.Sequence) throw new NotSupportedException("请使用 CompileProgram 提供序列的点击、按住和松开片段。");
         if (repeat == MacroRepeat.Toggle && capabilities?.SupportsNativeToggle != true) throw new NotSupportedException(OnboardToggleUnavailable);
-        var output = Parse(script, new HashSet<string>());
-        if (output.Count == 0) throw new FormatException("请先添加宏步骤。");
-        if (repeat == MacroRepeat.WhileHeld) output.Add([2]);
-        if (repeat == MacroRepeat.Toggle) output.Add([3]);
-        output.Add([0xFF]);
-        return new(output, repeat);
+        return CompileProgram(script, repeat).ToOnboard(capabilities);
     }
 
-    private static List<byte[]> Parse(string script, HashSet<string> held, bool requireReleased = true)
+    internal static CompiledMacro CompileNativeLua(string script, OnboardCapabilities capabilities)
+    {
+        if (!capabilities.SupportsNativeLua) throw new NotSupportedException("设备未声明运行时 Lua 指令扩展。");
+        var instructions = Parse(script, [], nativeLua: true); instructions.Add([0xFF]);
+        var result = new CompiledMacro(instructions, MacroRepeat.Once);
+        ValidateFirmwareInstructions(result, capabilities); return result;
+    }
+
+    public static void ValidateFirmwareInstructions(CompiledMacro macro, OnboardCapabilities capabilities)
+    {
+        if (!macro.UsesNativeLua) return;
+        if (!capabilities.SupportsNativeLua) throw new NotSupportedException("当前固件没有运行时 Lua 指令扩展，不能写入此宏。");
+        if (macro.Repeat != MacroRepeat.Once || macro.Instructions.Count < 2 || !macro.Instructions[0].SequenceEqual(new byte[] { 7 }) ||
+            macro.Instructions.Skip(1).Any(i => i.Length > 0 && i[0] == 7) || macro.Instructions.Any(i => i.Length > 0 && i[0] is 1 or 2 or 3))
+            throw new InvalidDataException("运行时 Lua 宏的入口或循环模式无效。");
+    }
+
+    private static List<byte[]> Parse(string script, HashSet<string> held, bool requireReleased = true, bool nativeLua = false)
     {
         var output = new List<byte[]>();
         var lineNumber = 0;
@@ -44,6 +57,16 @@ public static class MacroCompiler
             {
                 switch (command)
                 {
+                    case "native-begin" when nativeLua && parts.Length == 1:
+                        output.Add([7]); break;
+                    case "loop-begin" when nativeLua && parts.Length == 1:
+                        output.Add([5]); break;
+                    case "exit-unless-held" or "loop-held" when nativeLua && parts.Length == 2:
+                        var physicalMask = Number(parts[1], 1, 65535);
+                        output.Add([(byte)(command == "exit-unless-held" ? 4 : 6), (byte)(physicalMask >> 8), (byte)physicalMask]); break;
+                    case "random-delay" when nativeLua && parts.Length == 3:
+                        var min = Number(parts[1], 0, 65535); var max = Number(parts[2], min, 65535);
+                        output.Add([0x62, (byte)(min >> 8), (byte)min, (byte)(max >> 8), (byte)max]); break;
                     case "tap" when parts.Length == 2:
                         var tap = HidKeys.ParseChord(parts[1]);
                         if (tap.Usage != 0 && held.Contains($"hid:{tap.Usage}")) throw new FormatException("不能击键一个尚未松开的按键。");
@@ -98,7 +121,6 @@ public static class MacroCompiler
             {
                 throw new FormatException($"宏第 {lineNumber} 行：{ex.Message}", ex);
             }
-            if (output.Count > 10000) throw new FormatException("宏指令数超过限制。");
         }
         if (requireReleased && held.Count != 0) throw new FormatException("宏结束前必须释放所有按键：" + string.Join(", ", held));
         return output;
@@ -114,8 +136,10 @@ public static class MacroCompiler
         if (!initialHeld.SetEquals(held)) throw new FormatException("按住片段每轮结束时需恢复到点击片段结束时的按键状态。");
         var last = repeat == MacroRepeat.Sequence ? Parse(release, held) : [];
         if (first.Count + middle.Count + last.Count == 0) throw new FormatException("请先添加宏步骤。");
-        List<byte[]> Delay(List<byte[]> list) => standardDelay == 0 ? list : WithStandardDelay(new(list, repeat), standardDelay).Instructions.ToList();
-        return new(repeat, Delay(first), Delay(middle), Delay(last));
+        List<byte[]> Delay(List<byte[]> instructions, bool loops)
+            => standardDelay == 0 ? instructions : AddStandardDelays(instructions, standardDelay, loops);
+        return new(repeat, Delay(first, repeat is MacroRepeat.WhileHeld or MacroRepeat.Toggle or MacroRepeat.Continuous),
+            Delay(middle, loops: true), Delay(last, loops: false));
     }
 
     private static void AddKeyboard(List<byte[]> output, bool down, byte modifier, byte usage)
@@ -143,8 +167,11 @@ public static class MacroCompiler
         return number;
     }
 
-    public static int InstructionSize(byte opcode) => opcode switch
+    public static int InstructionSize(byte opcode, OnboardCapabilities? capabilities = null) => opcode switch
     {
+        4 or 6 when capabilities?.SupportsNativeLua == true => 3,
+        5 or 7 when capabilities?.SupportsNativeLua == true => 1,
+        0x62 when capabilities?.SupportsNativeLua == true => 5,
         0 or 1 or 2 or 3 or 0xFF => 1,
         0x20 or 0x21 => 2,
         >= 0x40 and <= 0x46 or 0x60 => 3,
@@ -155,13 +182,23 @@ public static class MacroCompiler
     public static CompiledMacro WithStandardDelay(CompiledMacro macro, ushort milliseconds)
     {
         if (milliseconds == 0) throw new ArgumentOutOfRangeException(nameof(milliseconds));
+        return new(AddStandardDelays(macro.Instructions, milliseconds, loops: false), macro.Repeat);
+    }
+
+    private static List<byte[]> AddStandardDelays(IReadOnlyList<byte[]> instructions, ushort milliseconds, bool loops)
+    {
         var output = new List<byte[]>();
-        for (var i = 0; i < macro.Instructions.Count; i++)
+        for (var i = 0; i < instructions.Count; i++)
         {
-            var current = macro.Instructions[i]; output.Add(current);
-            if (current[0] is >= 0x41 and <= 0x46 && i + 1 < macro.Instructions.Count && macro.Instructions[i + 1][0] != 0x40)
+            var current = instructions[i];
+            output.Add(current);
+            var next = i + 1;
+            // The first instruction is next after a repeat. A recorded wait
+            // on either side of the boundary already provides that gap.
+            if (loops && next == instructions.Count) next = 0;
+            if (current[0] is >= 0x41 and <= 0x46 && next < instructions.Count && instructions[next][0] != 0x40)
                 output.Add([0x40, (byte)(milliseconds >> 8), (byte)milliseconds]);
         }
-        return new(output, macro.Repeat);
+        return output;
     }
 }

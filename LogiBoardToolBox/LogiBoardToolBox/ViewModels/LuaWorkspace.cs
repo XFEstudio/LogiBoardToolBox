@@ -28,8 +28,8 @@ public partial class MainPageViewModel
     [ObservableProperty] public partial string LuaLog { get; set; } = "";
     [ObservableProperty] public partial EditorChoice LuaBoardTrigger { get; set; } = new("1", "左键事件（arg = 1）");
     [ObservableProperty] public partial EditorChoice LuaBoardRepeat { get; set; } = MacroEditor.RepeatChoices[0];
-    public IReadOnlyList<EditorChoice> LuaBoardTriggers { get; } = [new("1", "左键事件（arg = 1）"), new("3", "右键事件（arg = 3）"), new("2", "中键事件（arg = 2）"), new("4", "后退侧键（arg = 4）"), new("5", "前进侧键（arg = 5）")];
-    public IReadOnlyList<EditorChoice> LuaBoardRepeats { get; } = MacroEditor.RepeatChoices;
+    public List<EditorChoice> LuaBoardTriggers { get; } = [new("1", "左键事件（arg = 1）"), new("3", "右键事件（arg = 3）"), new("2", "中键事件（arg = 2）"), new("4", "后退侧键（arg = 4）"), new("5", "前进侧键（arg = 5）")];
+    public List<EditorChoice> LuaBoardRepeats { get; } = MacroEditor.RepeatChoices;
     public bool CanEditLua => !LuaRunning && !LuaConverting;
     public event EventHandler? LuaMacroCreated;
     partial void OnLuaRunningChanged(bool value) { OnPropertyChanged(nameof(CanEditLua)); UpdateCapabilities(); }
@@ -88,7 +88,7 @@ public partial class MainPageViewModel
         {
             var path = Path.Combine(dataDirectory, "lua-profile.json");
             if (!File.Exists(path)) return;
-            var saved = JsonSerializer.Deserialize<LuaProfile>(File.ReadAllText(path));
+            var saved = JsonSerializer.Deserialize(File.ReadAllText(path), SettingsJsonContext.Default.LuaProfile);
             if (saved is null) return;
             LuaSourceFile.ValidateSource(saved.Source);
             LuaName = saved.Name; LuaSource = saved.Source; LuaExecuteLeft = saved.ExecuteLeft; LuaExecuteRight = saved.ExecuteRight;
@@ -101,7 +101,7 @@ public partial class MainPageViewModel
     {
         CommitLuaEditor();
         Directory.CreateDirectory(dataDirectory);
-        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "lua-profile.json"), JsonSerializer.Serialize(new LuaProfile(LuaName, LuaSource, LuaExecuteLeft, LuaExecuteRight), new JsonSerializerOptions { WriteIndented = true }));
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "lua-profile.json"), JsonSerializer.Serialize(new LuaProfile(LuaName, LuaSource, LuaExecuteLeft, LuaExecuteRight), SettingsJsonContext.Default.LuaProfile));
         LuaStatus = "Lua 源码及左右键设置已保存；软件启动时保持关闭。";
     }
     [RelayCommand] private async Task StartLuaAsync() => await RunAsync(async () =>

@@ -13,7 +13,7 @@ using AnimationDirection = LogiBoardToolBox.Core.Lighting.AnimationDirection;
 
 namespace LogiBoardToolBox.Controls;
 
-public sealed class AnimationEditorView : UserControl
+public sealed partial class AnimationEditorView : UserControl
 {
     private MainPageViewModel Vm => App.MouseWorkspace;
     private readonly LightsyncMapView modelMap = new();
@@ -77,7 +77,7 @@ public sealed class AnimationEditorView : UserControl
         timeline.Children.Add(frames); timeline.Children.Add(playhead);
         var scroll = new ScrollViewer { Content = timeline, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Enabled };
         Grid.SetColumn(scroll, 1); timelineRow.Children.Add(scroll);
-        var add = Tool("", "animation-add-frame"); add.Height = 36; add.Padding = new(0); add.Content = new FontIcon { Glyph = "\uE710", FontSize = 18 }; add.Click += (_, _) => { Vm.InsertAnimationFrame(); RefreshFrames(); }; Grid.SetColumn(add, 2); timelineRow.Children.Add(add);
+        var add = Tool("", "animation-add-frame"); add.Height = 36; add.Padding = new(0); add.Content = "+"; add.FontSize = 22; add.Click += (_, _) => { Vm.InsertAnimationFrame(); RefreshFrames(); }; Grid.SetColumn(add, 2); timelineRow.Children.Add(add);
         timelineBox.Children.Add(timelineRow);
         var tools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
         foreach (var zoom in new[] { 25, 50, 100 }) { var button = Tool(zoom + "%", "animation-zoom-" + zoom); button.Width = 50; button.FontSize = 11; button.Click += (_, _) => { Vm.AnimationZoom = zoom; RefreshFrames(); }; tools.Children.Add(button); }

@@ -5,7 +5,7 @@ using Windows.ApplicationModel.DataTransfer;
 namespace LogiBoardToolBox.Controls;
 
 /// <summary>A G HUB style phase: horizontal editable actions followed by an insert control.</summary>
-public sealed class MacroPhaseView : UserControl
+public sealed partial class MacroPhaseView : UserControl
 {
     public static readonly DependencyProperty ScriptProperty = DependencyProperty.Register(nameof(Script), typeof(string), typeof(MacroPhaseView), new PropertyMetadata("", Changed));
     public static readonly DependencyProperty SegmentProperty = DependencyProperty.Register(nameof(Segment), typeof(string), typeof(MacroPhaseView), new PropertyMetadata("press", Changed));
@@ -59,22 +59,21 @@ public sealed class MacroPhaseView : UserControl
             var index = i; MacroStepEditor step;
             try { step = MacroStepEditor.FromScript(lines[i]); } catch (NotSupportedException) { continue; }
             if (!ShowUpDown && step.Kind.Id is "key-up" or "mouse-up" or "consumer-up") continue;
-            var delay = step.Kind.Id == "delay";
             var label = step.Kind.Id switch { "delay" => step.Value + " ms", "key-down" or "mouse-down" or "consumer-down" => step.Value + (ShowUpDown ? " ↓" : ""), "key-up" or "mouse-up" or "consumer-up" => step.Value + " ↑", "wait-release" => "松开", _ => step.Value };
             var labels = ShowUpDown && step.Kind.Id == "tap" ? new[] { step.Value + " ↓", step.Value + " ↑" } : new[] { label };
             foreach (var displayed in labels)
             {
-            var button = new Button { Content = displayed, MinWidth = delay ? 58 : 42, Height = 40, Padding = new(10, 0, 10, 0), FontSize = 13, Background = Brush(delay ? 42 : 57), BorderBrush = Brush(85), BorderThickness = new(1), CornerRadius = new(2), CanDrag = true, AllowDrop = true };
-            button.Click += (_, _) => { Select(index); ShowStepEditor(button, index); };
-            button.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Delete) { Select(index); Model.RemoveStepCommand.Execute(null); e.Handled = true; } };
-            button.DragStarting += (_, e) => { e.Data.SetText($"LogiBoard.Step:{Segment}:{index}"); e.AllowedOperations = DataPackageOperation.Move; };
-            button.DragOver += (_, e) => e.AcceptedOperation = e.DataView.Contains(StandardDataFormats.Text) ? DataPackageOperation.Move : DataPackageOperation.None;
-            button.Drop += async (_, e) => { if (e.DataView.Contains(StandardDataFormats.Text)) MoveStep(await e.DataView.GetTextAsync(), index); };
-            var menu = new MenuFlyout(); var delete = new MenuFlyoutItem { Text = "删除" }; delete.Click += (_, _) => { Select(index); Model.RemoveStepCommand.Execute(null); }; menu.Items.Add(delete); button.ContextFlyout = menu;
-            actions.Children.Add(button);
+                var button = CreateStepButton(step, displayed);
+                button.Click += (_, _) => { Select(index); ShowStepEditor(button, index); };
+                button.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Delete) { Select(index); Model.RemoveStepCommand.Execute(null); e.Handled = true; } };
+                button.DragStarting += (_, e) => { e.Data.SetText($"LogiBoard.Step:{Segment}:{index}"); e.AllowedOperations = DataPackageOperation.Move; };
+                button.DragOver += (_, e) => e.AcceptedOperation = e.DataView.Contains(StandardDataFormats.Text) ? DataPackageOperation.Move : DataPackageOperation.None;
+                button.Drop += async (_, e) => { if (e.DataView.Contains(StandardDataFormats.Text)) MoveStep(await e.DataView.GetTextAsync(), index); };
+                var menu = new MenuFlyout(); var delete = new MenuFlyoutItem { Text = "删除" }; delete.Click += (_, _) => { Select(index); Model.RemoveStepCommand.Execute(null); }; menu.Items.Add(delete); button.ContextFlyout = menu;
+                actions.Children.Add(button);
             }
         }
-        var insert = new Button { Content = "+", FontSize = 26, Width = 40, Height = 40, MinHeight = 0, Padding = new(0), Background = Brush(57), BorderThickness = new(0), CornerRadius = new(2) };
+        var insert = new Button { Content = "+", FontSize = 30, Width = 40, Height = 40, MinHeight = 0, Padding = new(0), VerticalAlignment = VerticalAlignment.Center, Background = Brush(57), BorderThickness = new(0), CornerRadius = new(2) };
         var flyout = new MenuFlyout();
         void Item(string label, string? kind)
         {
@@ -85,6 +84,41 @@ public sealed class MacroPhaseView : UserControl
         Item("● 记录按键", null); Item("击键", "tap"); Item("按键按下", "key-down"); Item("按键抬起", "key-up"); Item("延迟", "delay"); Item("鼠标按下", "mouse-down"); Item("鼠标松开", "mouse-up"); Item("滚轮", "wheel"); Item("水平滚轮", "pan"); Item("鼠标移动", "move"); Item("媒体按下", "consumer-down"); Item("媒体抬起", "consumer-up");
         insert.Flyout = flyout; actions.Children.Add(insert);
         if (lines.Length == 0) actions.Children.Add(new TextBlock { Text = "立即开始", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center, Margin = new(0, 0, 0, 8) });
+    }
+
+    private Button CreateStepButton(MacroStepEditor step, string label)
+    {
+        object content = label;
+        var name = label;
+        if (step.Kind.Id == "delay")
+        {
+            content = MacroStepVisual.Delay(step.Value);
+            name = $"延迟 {step.Value} 毫秒";
+        }
+        else if (step.Kind.Id is "mouse-down" or "mouse-up")
+        {
+            var down = step.Kind.Id == "mouse-down";
+            try
+            {
+                var number = Core.Macros.MacroCompiler.Number(step.Value, 1, 16);
+                var mouse = number switch { 1 => "左键", 2 => "右键", 3 => "中键", 4 => "后退侧键", 5 => "前进侧键", _ => $"鼠标按键 {number}" };
+                name = mouse + (down ? "按下" : "抬起");
+                content = number <= 3 ? MacroStepVisual.Mouse(number, down, ShowUpDown) : mouse + (ShowUpDown ? down ? " ↓" : " ↑" : "");
+            }
+            catch (Exception error) when (error is FormatException or OverflowException) { name = "鼠标按键 " + label; }
+        }
+        var visual = content is FrameworkElement;
+        var button = new Button
+        {
+            Content = content, MinWidth = 42, Height = visual ? 64 : 40,
+            Padding = visual ? new(4, 0, 4, 0) : new(10, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center, FontSize = 13,
+            Background = visual ? Brush(0) : Brush(57), BorderBrush = Brush(85),
+            BorderThickness = new(visual ? 0 : 1), CornerRadius = new(2), CanDrag = true, AllowDrop = true
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, name);
+        ToolTipService.SetToolTip(button, name);
+        return button;
     }
     private void ShowStepEditor(Button anchor, int index)
     {

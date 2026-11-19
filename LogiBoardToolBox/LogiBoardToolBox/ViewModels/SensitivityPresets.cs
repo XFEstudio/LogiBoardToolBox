@@ -13,7 +13,7 @@ public partial class MainPageViewModel
     private string SensitivityFile => Path.Combine(dataDirectory, "sensitivity-presets.json");
     private void ReadSensitivityPresets()
     {
-        try { if (File.Exists(SensitivityFile)) foreach (var preset in JsonSerializer.Deserialize<SensitivityPreset[]>(File.ReadAllText(SensitivityFile)) ?? []) if (preset.Stages.Length == 5) SensitivityPresets.Add(preset); }
+        try { if (File.Exists(SensitivityFile)) foreach (var preset in JsonSerializer.Deserialize(File.ReadAllText(SensitivityFile), LogiBoardToolBox.Profiles.ProfileJsonContext.Default.SensitivityPresets) ?? []) if (preset.Stages.Length == 5) SensitivityPresets.Add(preset); }
         catch (Exception ex) { Log("读取灵敏度预设：" + ex.Message); }
     }
     public void SaveSensitivityPreset(bool create)
@@ -48,6 +48,6 @@ public partial class MainPageViewModel
     private void PersistSensitivity()
     {
         Directory.CreateDirectory(dataDirectory);
-        File.WriteAllText(SensitivityFile, JsonSerializer.Serialize(SensitivityPresets, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(SensitivityFile, JsonSerializer.Serialize(SensitivityPresets.ToArray(), LogiBoardToolBox.Profiles.ProfileJsonContext.Default.SensitivityPresets));
     }
 }

@@ -22,7 +22,17 @@ public static class HidPlusPlusDeviceProbe
         {
             var info = await client.FeatureAsync(0x0003, 0, ct: ct).ConfigureAwait(false);
             var reported = MouseCatalog.ReadTransportProductIds(info);
-            if (reported.Count > 0) ids = reported;
+            if (reported.Count > 0)
+            {
+                ids = reported;
+                // Some older firmware returns incomplete transport identity.
+                // Retain a verified physical cable PID if *none* of the reported
+                // IDs identifies a model. Never use a shared receiver PID or
+                // override a recognised identity reported by the mouse.
+                if (!reported.Any(id => MouseCatalog.Resolve([id], "").IsKnown) &&
+                    hid.ProductId is >= 0xC000 and < 0xC400 && MouseCatalog.Resolve([hid.ProductId], "").IsKnown)
+                    ids = reported.Append(hid.ProductId).Distinct().ToArray();
+            }
             if (info.Length >= 5 && info.AsSpan(1, 4).IndexOfAnyExcept((byte)0) >= 0)
                 unit = Convert.ToHexString(info, 1, 4);
         }

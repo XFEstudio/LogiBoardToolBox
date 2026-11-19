@@ -10,7 +10,7 @@ public partial class MainPageViewModel
 {
     private AdvancedMouseController? advanced;
     private bool loadingAdvanced;
-    public IReadOnlyList<EditorChoice> LightforceModes { get; } = [new("1", "混合模式（节能）"), new("0", "仅光学模式")];
+    public List<EditorChoice> LightforceModes { get; } = [new("1", "混合模式（节能）"), new("0", "仅光学模式")];
     [ObservableProperty] public partial EditorChoice? SelectedLightforceMode { get; set; }
     [ObservableProperty] public partial bool HasLightforce { get; set; }
     [ObservableProperty] public partial bool HasHeroCalibration { get; set; }
@@ -18,7 +18,7 @@ public partial class MainPageViewModel
     [ObservableProperty] public partial bool? StartupEffectEnabled { get; set; }
     [ObservableProperty] public partial string HeroCalibrationStatus { get; set; } = "等待读取设备";
     public AdvancedMouseState? AdvancedState => advanced?.State;
-    public IReadOnlyList<EditorChoice> HeroChoices { get; } = [new("none", "无"), new("calibrate", "校准")];
+    public List<EditorChoice> HeroChoices { get; } = [new("none", "无"), new("calibrate", "校准")];
     private async Task ReadAdvancedSettingsAsync()
     {
         advanced = new(client!, SelectedDevice!.Name);
@@ -124,7 +124,7 @@ public partial class MainPageViewModel
         if (string.IsNullOrWhiteSpace(name)) throw new FormatException("请为校准命名。");
         Directory.CreateDirectory(dataDirectory);
         var path = Path.Combine(dataDirectory, "hero-calibration.json");
-        await File.WriteAllTextAsync(path + ".tmp", JsonSerializer.Serialize(new { Name = name.Trim(), Correction = correction, Device = SelectedDevice?.Identity, CapturedAt = DateTimeOffset.Now }));
+        await File.WriteAllTextAsync(path + ".tmp", Core.Diagnostics.DiagnosticJson.Serialize(new { Name = name.Trim(), Correction = correction, Device = SelectedDevice?.Identity, CapturedAt = DateTimeOffset.Now }));
         File.Move(path + ".tmp", path, true); HeroCalibrationStatus = $"{name.Trim()} · 修正 {correction / 1024d:P2} · 已收到传感器完成事件";
     }
 }

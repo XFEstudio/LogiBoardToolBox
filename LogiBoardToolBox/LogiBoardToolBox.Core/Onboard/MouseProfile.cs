@@ -35,17 +35,33 @@ public sealed class MouseProfile
         set
         {
             if (value.Length != 5) throw new ArgumentException("必须提供五个 DPI 槽；0 表示未使用。");
+            var newStageLod = Advanced ? GetNewDpiStageLod() : (byte)0;
             for (var i = 0; i < 5; i++)
             {
                 var offset = Advanced ? 4 + i * 5 : 3 + i * 2;
+                var wasDisabled = Advanced && BinaryPrimitives.ReadUInt16LittleEndian(raw.AsSpan(offset)) == 0;
                 BinaryPrimitives.WriteUInt16LittleEndian(raw.AsSpan(offset), value[i]);
                 if (!Advanced) continue;
-                // Disabled stages require a zeroed triplet. For a newly enabled
-                // stage G HUB uses Medium (2); existing active LOD bytes survive.
+                // Enabled stages keep the device's original LOD, including 0.
                 if (value[i] == 0) { raw.AsSpan(offset + 2, 3).Clear(); }
-                else if (raw[offset + 4] == 0) raw[offset + 4] = 2;
+                else if (wasDisabled && raw[offset + 4] == 0) raw[offset + 4] = newStageLod;
             }
         }
+    }
+
+    internal byte GetNewDpiStageLod()
+    {
+        // G304 X stores 0 on all active stages. Profiles with explicit LOD
+        // settings continue using Medium (2) for newly enabled stages.
+        var dpis = Dpis;
+        var hasEnabledStage = false;
+        for (var i = 0; i < dpis.Length; i++)
+        {
+            if (dpis[i] is 0 or ushort.MaxValue) continue;
+            if (raw[8 + 5 * i] != 0) return 2;
+            hasEnabledStage = true;
+        }
+        return hasEnabledStage ? (byte)0 : (byte)2;
     }
     public string Name
     {
@@ -96,7 +112,17 @@ public sealed class MouseProfile
     public byte[] GetLighting(int slot) => raw.AsSpan(LightingOffset(slot), 11).ToArray();
     public void SetLighting(int slot, byte[] effect)
     {
-        if (Advanced) throw new NotSupportedException("格式 7 的板载灯效编码尚未核对，当前保留原灯效。");
+        if (Advanced) throw new NotSupportedException("格式 7 须根据设备报告的灯区写入板载灯效。");
+        CopyLighting(slot, effect);
+    }
+    internal void SetActiveRgbLighting(byte cluster, byte[] effect)
+    {
+        if (!Advanced || raw.Length != 255 || cluster >= 2)
+            throw new InvalidDataException("板载 RGB 灯区与配置格式不匹配。");
+        CopyLighting(cluster, effect);
+    }
+    private void CopyLighting(int slot, byte[] effect)
+    {
         if (effect.Length != 11) throw new ArgumentException("灯效记录必须是 11 字节。");
         effect.CopyTo(raw, LightingOffset(slot));
     }
@@ -134,7 +160,7 @@ public sealed class MouseProfile
             var ys = GetDpisY(capabilities);
             for (var i = 0; i < 5; i++)
                 if (dpis[i] == 0 ? ys[i] != 0 || raw[8 + 5 * i] != 0 :
-                    dpis[i] == 65535 || ys[i] is 0 or 65535 || raw[8 + 5 * i] is < 1 or > 3)
+                    dpis[i] == 65535 || ys[i] is 0 or 65535 || raw[8 + 5 * i] > 3)
                     throw new InvalidDataException("格式 7 的 X/Y DPI 与抬升距离记录无效，停止写入。");
         }
         if (!Enumerable.Range(0, capabilities.ButtonCount).Any(i => GetBinding(i).SequenceEqual(ButtonBinding.Mouse(1))))

@@ -1,14 +1,16 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using LogiBoardToolBox.Core.Serialization;
 
 namespace LogiBoardToolBox.Core.Devices;
 
 public sealed record MouseModel(string Id, string GHubModelId, string SlotPrefix, string DisplayName,
-    string[] Aliases, ushort[] ProductIds, string ImageAsset, double ImageAspect, string Layout, string[] ButtonNames, int LightingZoneCount)
+    string[] Aliases, ushort[] ProductIds, string ImageAsset, double ImageAspect, string Layout, string[] ButtonNames, int LightingZoneCount,
+    string? SideImageAsset = null)
 {
     public bool IsKnown => Id != "Unknown";
     public bool HasLighting => LightingZoneCount > 0;
-    public bool HasSideView => Layout == "G502X";
+    public bool HasSideView => Layout == "G502X" && !string.IsNullOrWhiteSpace(SideImageAsset);
     public string ButtonName(int index) => index < ButtonNames.Length ? ButtonNames[index] : $"按键 {index + 1}";
     public bool TryGetButtonIndex(string slot, out int index)
     {
@@ -27,9 +29,16 @@ public static class MouseCatalog
     public static MouseModel Unknown { get; } = new("Unknown", "", "", "Logitech Mouse", [], [], "", .53, "Generic", [], 0);
     private static IReadOnlyList<MouseModel> Load()
     {
-        using var stream = typeof(MouseCatalog).Assembly.GetManifestResourceStream("LogiBoardToolBox.Core.Devices.mice.json")
-            ?? throw new InvalidOperationException("鼠标型号目录缺失。");
-        return JsonSerializer.Deserialize<MouseModel[]>(stream) ?? throw new InvalidDataException("鼠标型号目录无效。");
+        var models = new List<MouseModel>();
+        foreach (var name in new[] { "mice.json", "mice-extended.json" })
+        {
+            using var stream = typeof(MouseCatalog).Assembly.GetManifestResourceStream("LogiBoardToolBox.Core.Devices." + name)
+                ?? throw new InvalidOperationException("鼠标型号目录缺失：" + name);
+            models.AddRange(JsonSerializer.Deserialize(stream, BoardJsonContext.Default.MouseModelArray) ?? throw new InvalidDataException("鼠标型号目录无效：" + name));
+        }
+        if (models.Any(m => string.IsNullOrWhiteSpace(m.ImageAsset)) || models.Select(m => m.Id).Distinct().Count() != models.Count)
+            throw new InvalidDataException("型号目录存在缺失图片映射或重复型号。");
+        return models;
     }
     public static MouseModel? BySlotPrefix(string prefix) => string.IsNullOrWhiteSpace(prefix) ? null : Models.SingleOrDefault(m => m.SlotPrefix == prefix);
     public static MouseModel? ById(string id) => Models.SingleOrDefault(m => m.Id == id);

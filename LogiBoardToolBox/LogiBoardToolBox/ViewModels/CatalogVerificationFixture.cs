@@ -14,7 +14,9 @@ public partial class MainPageViewModel
         using var scope=PauseImmediateSave();
         SelectedDevice=new(new("catalog-preview",model.ProductIds[0],model.DisplayName,"PREVIEW",0xFF00,1,20,20),1,model.DisplayName,"PREVIEW",model.ProductIds);
         if(client is not null || memory is not null) throw new InvalidOperationException("离线验收不得持有物理设备句柄。");
-        var format=(byte)(model.Layout=="G502X"?10:model.Id is "Pro2" or "Superlight2" or "Superlight2Dex"?7:3);var buttons=(byte)(model.Layout=="G502X"?11:model.ButtonNames.Length);
+        // Artwork-only models use an explicitly synthetic six-button fixture;
+        // production views obtain the count from the mouse, not this preview.
+        var format=(byte)(model.Layout=="G502X"?10:model.Id is "Pro2" or "Superlight2" or "Superlight2Dex"?7:3);var buttons=(byte)(model.Layout=="G502X"?11:model.ButtonNames.Length==0?6:model.ButtonNames.Length);
         var profiles=(byte)(model.Id=="G305"?1:5);
         var read=new MemorySnapshot{DeviceName=model.DisplayName,DeviceIdentity="catalog-preview:"+model.Id,Mode=1,ActiveSector=1,
             Description=[1,format,1,profiles,0,buttons,16,0,255,0x0A,4,0,0,0,0,0]};
@@ -58,15 +60,57 @@ public partial class MainPageViewModel
     }
 
     private Utilities.DiagnosticReplayTransport? verificationStorage;
+    internal void LoadClassicG502DiagnosticSnapshot(MemorySnapshot captured)
+    {
+        var model = MouseCatalog.Resolve([], captured.DeviceName);
+        if (!Utilities.UiVerification.IsCatalogRequested || model.Layout != "G502Classic" ||
+            !captured.Capabilities.CanEditProfiles || captured.Capabilities.ButtonCount != 11 || captured.Mode != 1)
+            throw new InvalidOperationException("需要经典 G502 的 11 键板载诊断快照。");
+        LoadCatalogVerificationFixture(model);
+        using var scope = PauseImmediateSave();
+        snapshot = captured;
+        Macros.Clear();
+        SelectedMacro = null;
+        ReloadDiagnosticProfiles(captured.ActiveSector);
+        DeviceSummary = captured.Capabilities.Summary;
+        NotifyDeviceModel();
+        UpdateCapabilities();
+    }
+
+    internal void LoadAdvancedDpiDiagnosticSnapshot(MemorySnapshot captured, Core.HidPlusPlus.SensorPerformance capturedSensor, string modelId)
+    {
+        var model = MouseCatalog.ById(modelId);
+        if (!Utilities.UiVerification.IsCatalogRequested || !captured.Capabilities.UsesAdvancedProfile || model?.DisplayName != captured.DeviceName)
+            throw new InvalidOperationException("需要对应型号的格式 7 离线诊断快照。");
+        LoadCatalogVerificationFixture(model);
+        using var scope = PauseImmediateSave();
+        snapshot = captured;
+        snapshotDeviceIdentity = SelectedDevice!.Identity;
+        Macros.Clear();
+        SelectedMacro = null;
+        LoadSensorPerformance(capturedSensor);
+        ReloadDiagnosticProfiles(captured.Mode == 1 ? captured.ActiveSector : (ushort)1);
+        DeviceSummary = captured.Capabilities.Summary;
+        StatusTitle = "诊断数据离线回放";
+        HasError = false;
+        NotifyDeviceModel();
+        UpdateCapabilities();
+    }
+
     internal void LoadLegacyDiagnosticSnapshot(MemorySnapshot captured)
     {
         if (!Utilities.UiVerification.IsCatalogRequested || !captured.Capabilities.UsesLegacyMacroPages || client is not null || memory is not null)
             throw new InvalidOperationException("仅允许回放已核对的传统布局离线快照。");
         var g402 = captured.Capabilities.SectorSize == 1024;
-        LoadCatalogVerificationFixture(MouseCatalog.ById(g402 ? "G402" : "G502Hero")!);
+        var lightspeed = captured.Capabilities.ProfileFormat == 3 && captured.Capabilities.SectorSize == 255;
+        var g102 = captured.Capabilities.ProfileFormat == 4;
+        var modelId = g402 ? "G402" : lightspeed ? "G502Wireless" : g102 ? "G203Lightsync" : "G502Hero";
+        LoadCatalogVerificationFixture(MouseCatalog.ById(modelId)!);
         using var scope = PauseImmediateSave();
         snapshot = captured; snapshotDeviceIdentity = SelectedDevice!.Identity;
         Macros.Clear(); var macro = g402 ? new MacroEditor { Name = "跳标", Script = "key Space down\ndelay 40\nkey Space up\nkey Left down\ndelay 125\nkey Left up", SelectedRepeat = MacroEditor.RepeatChoices[1], UseStandardDelay = false }
+            : lightspeed ? new MacroEditor { Name = "复制并粘贴", Script = "tap Ctrl+C\ndelay 80\ntap Ctrl+V", UseStandardDelay = false }
+            : g102 ? new MacroEditor { Name = "滚轮上滚", Script = "wheel 1", UseStandardDelay = false }
             : new MacroEditor { Name = "测试", Script = "key D down\nkey D up", UseStandardDelay = true, StandardDelay = "50" };
         Macros.Add(macro); SelectedMacro = macro;
         refreshingProfiles = true; drafts.Clear();
@@ -97,20 +141,60 @@ public partial class MainPageViewModel
         }
     }
 
-    internal Utilities.DiagnosticReplayTransport AttachDiagnosticReplay()
+    internal void LoadSaveRecoveryVerificationFixture(MemorySnapshot captured, MouseModel model)
+    {
+        LoadCatalogVerificationFixture(model);
+        using var scope = PauseImmediateSave();
+        SelectedDevice = SelectedDevice! with { Name = captured.DeviceName, DeviceIndex = model.Id == "G502X" ? (byte)0xFF : (byte)1 };
+        snapshot = captured;
+        snapshotDeviceIdentity = SelectedDevice!.Identity;
+        Macros.Clear();
+        SelectedMacro = null;
+        ReloadDiagnosticProfiles(captured.ActiveSector);
+        DeviceSummary = captured.Capabilities.Summary;
+        NotifyDeviceModel();
+        UpdateCapabilities();
+    }
+
+    internal async Task ReadDiagnosticReplayStorageAsync()
+    {
+        if (!Utilities.UiVerification.IsCatalogRequested || verificationStorage is null)
+            throw new InvalidOperationException("仅用于板载存储离线回放。");
+        await RefreshSnapshotKeepingEditsAsync();
+    }
+
+    internal Utilities.DiagnosticReplayTransport AttachDiagnosticReplay(byte onboardFeature = 2, byte dpiFeature = 0,
+        IReadOnlyDictionary<ushort, byte[]>? rgbInfo = null, TimeSpan? timeout = null)
     {
         if (!Utilities.UiVerification.IsCatalogRequested || snapshot is null || client is not null || memory is not null)
             throw new InvalidOperationException("仅允许连接隔离的内存回放设备。");
-        verificationStorage = new(snapshot);
-        client = new(verificationStorage, 1);
-        memory = new(client, snapshot.DeviceIdentity, snapshot.DeviceName);
+        verificationStorage = new(snapshot, onboardFeature, dpiFeature, rgbInfo);
+        var connection = new Core.HidPlusPlus.HidPlusPlusClient(verificationStorage, SelectedDevice?.DeviceIndex ?? 1);
+        if (timeout is { } duration) connection.Timeout = duration;
+        SetDeviceClient(connection);
+        memory = new(connection, snapshot.DeviceIdentity, snapshot.DeviceName);
         SelectedConfiguration = Configurations.Single(c => c.Onboard && c.Sector == SelectedProfile!.Sector);
         return verificationStorage;
+    }
+
+    internal async Task<Utilities.DiagnosticReplayTransport> AttachDpiDiagnosticReplayAsync()
+    {
+        var replay = AttachDiagnosticReplay(0x0D, 0x09);
+        await client!.GetFeatureAsync(0x8100);
+        await client.GetFeatureAsync(0x2202);
+        return replay;
+    }
+    internal async Task<Utilities.DiagnosticReplayTransport> AttachLightingDiagnosticReplayAsync(IReadOnlyDictionary<ushort, byte[]> rgbInfo)
+    {
+        var replay = AttachDiagnosticReplay(rgbInfo: rgbInfo);
+        await ReadLightingCapabilitiesAsync();
+        UpdateCapabilities();
+        return replay;
     }
     internal void DetachDiagnosticReplay()
     {
         if (verificationStorage is null) return;
-        client?.Dispose(); client = null; memory = null; verificationStorage = null; refreshBeforeRetry = false;
+        SetDeviceClient(null); memory = null; verificationStorage = null; refreshBeforeRetry = false;
     }
 
     internal void LoadToggleDiagnosticSnapshot(MemorySnapshot captured)
@@ -134,14 +218,14 @@ public partial class MainPageViewModel
         ReloadDiagnosticProfiles();
     }
 
-    private void ReloadDiagnosticProfiles()
+    private void ReloadDiagnosticProfiles(ushort selectedSector = 1)
     {
         using var scope = PauseImmediateSave();
         refreshingProfiles = true; drafts.Clear();
         try
         {
             Profiles.Clear(); foreach (var profile in snapshot!.GetProfiles()) Profiles.Add(profile);
-            SelectedProfile = Profiles.Single(p => p.Sector == 1);
+            SelectedProfile = Profiles.FirstOrDefault(p => p.Sector == selectedSector) ?? Profiles[0];
         }
         finally { refreshingProfiles = false; }
         RebuildConfigurations();

@@ -29,6 +29,12 @@ public sealed class PerformanceController(HidPlusPlusClient client, bool wireles
 {
     public SensorPerformance? State { get; private set; }
     private bool extendedRate;
+
+    public void ObserveDpi(ushort x, ushort y, byte? lod)
+    {
+        if (State is { } current) State = current with { CurrentX = x, CurrentY = y, Lod = lod ?? current.Lod };
+    }
+
     public async Task<SensorPerformance> ReadAsync(CancellationToken ct = default)
     {
         var extended = await client.GetFeatureAsync(0x2202, ct).ConfigureAwait(false) != 0;

@@ -1,7 +1,6 @@
 using LogiBoardToolBox.Profiles.CacheProfiles;
 using LogiBoardToolBox.Profiles.CrossVersionProfiles;
 using LogiBoardToolBox.Utilities;
-using XFEExtension.NetCore.WinUIHelper.Interface.Services;
 using XFEExtension.NetCore.WinUIHelper.Utilities;
 using XFEExtension.NetCore.WinUIHelper.Utilities.Helper;
 using XFEExtension.NetCore.XFEConsole;
@@ -44,9 +43,8 @@ namespace LogiBoardToolBox
             if (e.ExceptionObject is not Exception ex) return;
             Core.Diagnostics.DiagnosticLog.Record("unhandled", "AppDomain", error: ex);
             Console.WriteLine($"[ERROR]应用程序发生错误:{ex.Message}");
-            Console.WriteLine($"[TRACE]{ex.StackTrace}");
-            if (ServiceManager.GetService<IMessageService>() is not { } messageService) return;
-            messageService.ShowMessage(ex.Message, "发生错误", InfoBarSeverity.Error);
+            Console.WriteLine($"[TRACE]{ex}");
+            AppShellPage.Current?.ViewModel.MessageService.ShowMessage(ex.Message, "发生错误", severity: InfoBarSeverity.Error);
         }
 
         private static void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
@@ -54,9 +52,8 @@ namespace LogiBoardToolBox
             Core.Diagnostics.DiagnosticLog.Record("unhandled", "WinUI", error: e.Exception);
             if (UiVerification.IsCatalogRequested) UiVerification.CatalogUnhandledErrors.Add(e.Exception.ToString());
             Console.WriteLine($"[ERROR]应用程序发生错误:{e.Message}");
-            Console.WriteLine($"[TRACE]{e.Exception.StackTrace}");
-            if (ServiceManager.GetService<IMessageService>() is not { } messageService) return;
-            messageService.ShowMessage(e.Message, "发生错误", InfoBarSeverity.Error);
+            Console.WriteLine($"[TRACE]{e.Exception}");
+            AppShellPage.Current?.ViewModel.MessageService.ShowMessage(e.Message, "发生错误", severity: InfoBarSeverity.Error);
             e.Handled = true;
         }
 

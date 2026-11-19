@@ -7,10 +7,10 @@ namespace LogiBoardToolBox.ViewModels;
 
 public partial class MacroStepEditor : ObservableObject
 {
-    public static IReadOnlyList<EditorChoice> StepChoices { get; } =
+    public static List<EditorChoice> StepChoices { get; } =
         [new("tap", "击键"), new("key-down", "按键按下"), new("key-up", "按键松开"), new("delay", "延迟"),
          new("mouse-down", "鼠标按下"), new("mouse-up", "鼠标松开"), new("wheel", "滚轮"), new("pan", "水平滚轮"), new("move", "鼠标移动 X Y"), new("consumer-down", "媒体按下"), new("consumer-up", "媒体松开"), new("wait-release", "等待触发键松开")];
-    public IReadOnlyList<EditorChoice> Kinds => StepChoices;
+    public List<EditorChoice> Kinds => StepChoices;
     [ObservableProperty] public partial EditorChoice Kind { get; set; } = StepChoices[0];
     [ObservableProperty] public partial string Value { get; set; } = "A";
     public string ToScript() => Kind.Id switch
@@ -51,10 +51,14 @@ public partial class MainPageViewModel
     public bool IsSequenceMacro => SelectedMacro?.Repeat == MacroRepeat.Sequence;
     public bool ShowSoftwareToggleHint => IsEditingOnboard && SelectedMacro?.Repeat == MacroRepeat.Toggle && snapshot?.Capabilities.SupportsNativeToggle != true;
     public bool ShowNativeToggleHint => IsEditingOnboard && SelectedMacro?.Repeat == MacroRepeat.Toggle && snapshot?.Capabilities.SupportsNativeToggle == true;
+    public bool ShowMacroLoopHint => ShowNativeToggleHint || SelectedMacro?.Repeat == MacroRepeat.Continuous;
     public string MacroTypeDescription => SelectedMacro?.Repeat switch
     {
         MacroRepeat.Once => "按下时执行一次。",
         MacroRepeat.WhileHeld => "按住鼠标按键时重复，松开时停止并释放宏按键。",
+        MacroRepeat.Continuous => IsEditingOnboard
+            ? "按下后持续循环，松开鼠标键或关闭软件仍会继续。可将「停止所有宏」分配给另一个鼠标键。"
+            : "按下后持续循环。使用「板载与执行」里的「停止软件宏」结束播放。",
         MacroRepeat.Toggle => IsEditingOnboard ? snapshot?.Capabilities.SupportsNativeToggle == true
             ? "按下开始重复，再次按下停止。由鼠标固件执行，关闭软件后仍有效。"
             : "此鼠标的固件未声明板载同键触发能力；不会写成持续循环或按住循环。"
@@ -69,20 +73,21 @@ public partial class MainPageViewModel
         selectedMacroName = newValue?.Name ?? "";
         SelectedMacroSegment = MacroSegments[0];
         LoadTimeline();
-        OnPropertyChanged(nameof(IsSequenceMacro)); OnPropertyChanged(nameof(MacroTypeDescription)); OnPropertyChanged(nameof(ShowSoftwareToggleHint)); OnPropertyChanged(nameof(ShowNativeToggleHint));
+        OnPropertyChanged(nameof(IsSequenceMacro)); OnPropertyChanged(nameof(MacroTypeDescription)); OnPropertyChanged(nameof(ShowSoftwareToggleHint)); OnPropertyChanged(nameof(ShowMacroLoopHint));
     }
     private void MacroEditorChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MacroEditor.SelectedRepeat))
         {
             if (!IsSequenceMacro) SelectedMacroSegment = MacroSegments[0];
-            OnPropertyChanged(nameof(IsSequenceMacro)); OnPropertyChanged(nameof(MacroTypeDescription)); OnPropertyChanged(nameof(ShowSoftwareToggleHint)); OnPropertyChanged(nameof(ShowNativeToggleHint));
+            OnPropertyChanged(nameof(IsSequenceMacro)); OnPropertyChanged(nameof(MacroTypeDescription)); OnPropertyChanged(nameof(ShowSoftwareToggleHint)); OnPropertyChanged(nameof(ShowMacroLoopHint));
         }
         DiagnosticLogMacroEdit(sender as MacroEditor, e.PropertyName);
         if (e.PropertyName == nameof(MacroEditor.Name) && SelectedMacro is { } renamed)
         {
-            foreach (var row in AllBindings.Where(r => r.SelectedAction.Id == "macro" && r.Value == selectedMacroName))
-            { row.Value = renamed.Name; row.FriendlyName = renamed.Name; }
+            if (!Macros.Any(m => m.Name == selectedMacroName))
+                foreach (var row in AllBindings.Where(r => r.SelectedAction.Id == "macro" && r.Value == selectedMacroName))
+                { row.Value = renamed.Name; row.FriendlyName = renamed.Name; }
             selectedMacroName = renamed.Name; RefreshAssignmentPalette();
         }
         if (e.PropertyName == nameof(MacroEditor.Color)) RefreshAssignmentPalette();

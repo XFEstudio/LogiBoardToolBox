@@ -3,10 +3,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Viewbox Stretch="Uniform">
         <Grid Width="1500" Height="1000" Background="Black">
-            <Viewbox x:Name="TopView" Width="258.28125" Height="435" Stretch="Fill" Margin="0,254,0,0" HorizontalAlignment="Center" VerticalAlignment="Top"><Grid Width="1391" Height="2700"><Polygon Fill="#A0A0A0" Points="220,1900 1290,1600 1275,2300 1165,2420 430,2500"/><Image Source="/Assets/Devices/G502XPlus/front_black.png" Stretch="Fill"/></Grid></Viewbox>
+            <Viewbox x:Name="TopView" Width="258.28125" Height="435" Stretch="Fill" Margin="0,254,0,0" HorizontalAlignment="Center" VerticalAlignment="Top"><Grid Width="1391" Height="2700"><Polygon Fill="#A0A0A0" Points="220,1900 1290,1600 1275,2300 1165,2420 430,2500"/><Image x:Name="TopModelImage" Stretch="Fill"/></Grid></Viewbox>
             <Image x:Name="SideView" Source="/Assets/Devices/G502XPlus/side_black.png" Width="179.74" Height="435" Stretch="Fill" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,254,0,0" Visibility="Collapsed"/>
             <Border x:Name="GenericSilhouette" Width="230" Height="435" CornerRadius="110,110,95,95" Background="#17191C" BorderBrush="#555555" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,254,0,0" Visibility="Collapsed"/>
             <Image x:Name="ModelImage" Height="435" Stretch="Fill" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,254,0,0" Visibility="Collapsed"/>
+            <TextBlock x:Name="ArtworkHint" Text="型号待识别 · 通用按键示意" FontSize="12" Foreground="#999999" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,712,0,0" Visibility="Collapsed"/>
             <Canvas x:Name="Callouts" Width="1500" Height="1000"/>
         </Grid>
     </Viewbox>

@@ -5,7 +5,11 @@ namespace LogiBoardToolBox.Profiles.CrossVersionProfiles
 {
     public partial class SystemProfile : XFEProfile
     {
-        public SystemProfile() => ProfilePath = $@"{AppPathHelper.LocalProfile}\{nameof(SystemProfile)}";
+        public SystemProfile()
+        {
+            JsonOptions.TypeInfoResolver = ProfileJsonContext.Default;
+            ProfilePath = $@"{AppPathHelper.LocalProfile}\{nameof(SystemProfile)}";
+        }
 
         /// <summary>
         /// 主题颜色

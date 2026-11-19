@@ -23,7 +23,7 @@ public partial class MainPageViewModel
 
     // Capture on the UI thread: no live observable collection is enumerated by
     // the background ZIP writer, and no device is read or changed by exporting.
-    internal JsonElement CaptureDiagnosticContext() => JsonSerializer.SerializeToElement(new
+    internal JsonElement CaptureDiagnosticContext() => DiagnosticJson.ToElement(new
     {
         At = DateTimeOffset.Now, SessionId = DiagnosticLog.Session?.Id,
         DiagnosticLog.Session?.LastError, Utilities.UiVerification.IsRequested,

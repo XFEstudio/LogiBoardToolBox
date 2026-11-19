@@ -3,6 +3,7 @@ using LogiBoardToolBox.Controls;
 using LogiBoardToolBox.Core.Devices;
 using LogiBoardToolBox.Core.Macros;
 using LogiBoardToolBox.Core.Onboard;
+using LogiBoardToolBox.ViewModels;
 using LogiBoardToolBox.Views;
 
 namespace LogiBoardToolBox.Utilities;
@@ -48,6 +49,7 @@ internal static partial class UiVerification
         finally { vm.DetachDiagnosticReplay(); }
         vm.LoadCatalogVerificationFixture(MouseCatalog.ById("GPW")!);
         await VerifyLuaWorkspaceAsync(page, tabs, capture, check);
+        await VerifyContinuousMacroAsync(page, capture, check);
         page.OpenLuaEditor(); vm.LuaName = "大文件保留录制延迟";
         var largePath = Path.Combine(SettingsDirectory, "large-import.lua");
         var source = "--[[" + new string(' ', 1_200_000) + "]]\n" + MainPageViewModel.ExampleLua;
@@ -80,6 +82,62 @@ internal static partial class UiVerification
         phase.NextPage();
         check("long-macro-timeline-navigation-retains-all-steps", phase.CurrentPage == 1 && macro.Script.Split('\n').Length == 8000, "Page navigation only changes rendering; the full program remains editable/exportable.");
         await capture("Macro-long-timeline-paged");
+        await VerifyMacroDeletionAsync(page, tabs, capture, check);
         check("update-verification-no-input-engines", !vm.LuaRunning && !vm.HostMacrosRunning && !vm.LightsyncRunning, "All writes target in-memory HID++ replay; no physical handles or Windows input engines.");
+    }
+
+    private static async Task VerifyContinuousMacroAsync(MainPage page, Func<string, Task> capture, Action<string, bool, string> check)
+    {
+        var vm = page.ViewModel;
+        vm.LoadCatalogVerificationFixture(MouseCatalog.ById("GPW")!);
+        page.BeginNewMacro();
+        vm.SelectedMacro!.Name = "持续循环验收";
+        page.AdvanceNewMacroName();
+        await capture("Macro-continuous-mode-choice");
+        page.ChooseNewMacroType((int)MacroRepeat.Continuous);
+        check("macro-creation-supports-continuous", vm.SelectedMacro?.Repeat == MacroRepeat.Continuous && vm.ShowMacroLoopHint, vm.MacroTypeDescription);
+        page.CancelNewMacro();
+
+        var replay = vm.AttachDiagnosticReplay();
+        try
+        {
+            page.OpenLuaEditor();
+            vm.LuaName = "板载持续循环";
+            vm.LuaBoardTrigger = vm.LuaBoardTriggers.Single(t => t.Id == "4");
+            vm.LuaBoardRepeat = vm.LuaBoardRepeats[0];
+            vm.LuaSource = """
+                function OnEvent(event, arg)
+                  if event == "MOUSE_BUTTON_PRESSED" and arg == 4 then
+                    while true do
+                      PressMouseButton(1)
+                      Sleep(17)
+                      ReleaseMouseButton(1)
+                      Sleep(33)
+                    end
+                  end
+                end
+                """;
+            await vm.ConvertLuaToBoardCommand.ExecuteAsync(null);
+            check("lua-continuous-infers-repeat-and-opens-editor", vm.SelectedMacro?.Name == vm.LuaName &&
+                vm.SelectedMacro.Repeat == MacroRepeat.Continuous && vm.MacroTypeDescription.Contains("停止所有宏"), vm.LuaStatus);
+            await capture("Macro-continuous-editor");
+
+            vm.SelectedButton = vm.StandardBindings[4];
+            vm.AssignPaletteItemCommand.Execute(new AssignmentItem("停止所有宏", "actions", "special", "macro-stop-all", ""));
+            await vm.FlushImmediateSaveAsync();
+            vm.MacroTarget = vm.StandardBindings[3];
+            vm.BindMacroCommand.Execute(null);
+            await vm.SaveMacrosCommand.ExecuteAsync(null);
+            await vm.FlushImmediateSaveAsync();
+            await vm.ReloadMacroLinksForVerificationAsync();
+            var binding = vm.StandardBindings[3];
+            var snapshot = await OnboardMemory.LoadBackupAsync(vm.LastBackupPath);
+            snapshot.Sectors = replay.Sectors;
+            var bytes = MacroAllocator.ReadMacroBytes(snapshot, new(ButtonBinding.MacroSector(binding.Original), ButtonBinding.MacroOffset(binding.Original)));
+            check("continuous-onboard-auto-write-and-readback", !vm.HasError && replay.WriteStarts > 0 && binding.Value == vm.LuaName &&
+                (binding.Original[0] >> 4) == 0 && vm.StandardBindings[4].Original[0] == 0x20 &&
+                Convert.ToHexString(bytes) == "41000140001142000140002103FF", vm.Status);
+        }
+        finally { vm.DetachDiagnosticReplay(); }
     }
 }

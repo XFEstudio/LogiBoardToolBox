@@ -79,14 +79,14 @@ internal static partial class UiVerification
             checks.Add(new { Name = "real-onboard-state-unchanged", Passed = unchanged, Detail = "All original sectors, mode and active profile match; no real DPI setting was applied by this verification." });
             if (!unchanged) failure ??= "The real onboard state changed during verification.";
             GetWindowThreadProcessId(GetForegroundWindow(), out var foregroundAfter);
-            await File.WriteAllTextAsync(Path.Combine(folder, "result.json"), JsonSerializer.Serialize(new
+            await File.WriteAllTextAsync(Path.Combine(folder, "result.json"), Core.Diagnostics.DiagnosticJson.Serialize(new
             {
                 ProcessId = Environment.ProcessId, Failure = failure, Checks = checks, States = states, Images = images,
                 ForegroundBefore = foregroundBefore, ForegroundAfter = foregroundAfter, HardwareWritesEnabled,
-                BuildSha256 = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(typeof(UiVerification).Assembly.Location))),
+                BuildSha256 = await GetBuildHashAsync(),
                 InputMethod = "Direct control text plus the exact Enter/blur/Escape commit handlers; no OS input injection or window activation",
                 SoftwareEnginesStopped = !vm.HostMacrosRunning && !vm.LightsyncRunning
-            }, new JsonSerializerOptions { WriteIndented = true }));
+            }, indented: true));
             App.MainWindow.Close();
         }
         CommitTextBox Field(string id, object? tag = null) => Tree(page).OfType<CommitTextBox>().Single(f => AutomationProperties.GetAutomationId(f) == id && (tag is null || ReferenceEquals(f.Tag, tag)));

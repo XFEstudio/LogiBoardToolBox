@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -37,19 +38,21 @@ public sealed class DiagnosticSession
         OS = RuntimeInformation.OSDescription, Framework = RuntimeInformation.FrameworkDescription,
         ProcessArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
         OSArchitecture = RuntimeInformation.OSArchitecture.ToString(), Environment.ProcessId,
-        Executable = Environment.ProcessPath,
+        Executable = Environment.ProcessPath, DynamicCodeSupported = RuntimeFeature.IsDynamicCodeSupported,
         Assemblies = new[] { Assembly.GetEntryAssembly(), typeof(DiagnosticSession).Assembly }
             .Where(a => a is not null).Distinct().Select(a => AssemblyInfo(a!)).ToArray()
     };
 
     private static object AssemblyInfo(Assembly assembly)
     {
+        var location = RuntimeFeature.IsDynamicCodeSupported ? assembly.Location :
+            assembly == Assembly.GetEntryAssembly() ? Environment.ProcessPath ?? "" : "";
         string? hash = null;
-        try { if (File.Exists(assembly.Location)) hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(assembly.Location))); }
+        try { if (File.Exists(location)) hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(location))); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         return new { Name = assembly.GetName().Name, Version = assembly.GetName().Version?.ToString(),
             Information = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
-            Path = assembly.Location, Sha256 = hash };
+            Path = location, Sha256 = hash };
     }
 
     public void Record(string category, string message, object? data = null, Exception? error = null)
@@ -60,13 +63,14 @@ public sealed class DiagnosticSession
             {
                 Directory.CreateDirectory(DirectoryPath);
                 if (File.Exists(CurrentPath) && new FileInfo(CurrentPath).Length >= PartSize) part++;
-                var line = JsonSerializer.Serialize(new { Sequence = ++sequence, At = DateTimeOffset.Now,
+                var line = DiagnosticJson.Serialize(new { Sequence = ++sequence, At = DateTimeOffset.Now,
                     Thread = Environment.CurrentManagedThreadId, Category = category, Message = message,
                     Data = data, Exception = error?.ToString(), ExceptionData = error?.Data.Keys.Cast<object>()
                         .ToDictionary(k => k.ToString() ?? "", k => error.Data[k]?.ToString()) });
                 File.AppendAllText(CurrentPath, line + "\n", new UTF8Encoding(false));
             }
-            catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or NotSupportedException or JsonException or ArgumentException)
+            catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or NotSupportedException or JsonException
+                or ArgumentException or InvalidOperationException or TargetInvocationException)
             { LastError = failure.ToString(); }
         }
     }

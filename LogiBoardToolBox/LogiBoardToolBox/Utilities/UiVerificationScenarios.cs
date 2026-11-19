@@ -43,9 +43,97 @@ internal static partial class UiVerification
         check("macro-edit-cancel-preserves-saved", expected.Name == "后台流程校验宏" && expected.Script.StartsWith("mouse 1 down", StringComparison.Ordinal), "Cancel restored the saved macro name and script.");
         await capture("17-macro-save-result");
     }
+
+    private static async Task VerifyMacroDeletionAsync(MainPage page, Controls.WorkspaceHost tabs, Func<string, Task> capture, Action<string, bool, string> check)
+    {
+        var vm = page.ViewModel;
+        vm.LoadCatalogVerificationFixture(Core.Devices.MouseCatalog.ById("GPW")!);
+        var retained = vm.Macros.Single();
+        var replay = vm.AttachDiagnosticReplay();
+        try
+        {
+            vm.SelectedAssignmentCategory = vm.AssignmentCategories.Single(c => c.Id == "macros");
+            page.BeginNewMacro();
+            var macro = vm.SelectedMacro!;
+            macro.Name = "可删除的录制宏";
+            page.AdvanceNewMacroName();
+            page.ChooseNewMacroType(0);
+            macro.Script = "tap A\ndelay 20";
+            vm.MacroTarget = vm.StandardBindings[3];
+            vm.BindMacroCommand.Execute(null);
+            Invoke(page, "macro-save");
+            await Until(() => tabs.SelectedIndex == 0, "save macro before deletion");
+            var writes = replay.WriteStarts;
+            var saved = Path.Combine(SettingsDirectory, "macros.json");
+            var before = await File.ReadAllTextAsync(saved);
+            var entry = vm.AssignmentItems.Single(m => m.Name == macro.Name);
+            page.OpenAssignmentItem(entry);
+            await capture("Macro-delete-entry");
+
+            Invoke(page, "macro-delete");
+            await ChooseDialogButton("取消");
+            await Until(() => !DialogButtons().Any(b => Equals(b.Content, "删除")), "dismiss delete dialog");
+            check("macro-delete-cancel-keeps-recording", tabs.SelectedIndex == 1 && vm.Macros.Contains(macro) && before == await File.ReadAllTextAsync(saved), "Cancel leaves the recording in the editor and the library file.");
+
+            Invoke(page, "macro-delete");
+            await ChooseDialogButton("删除");
+            await Until(() => tabs.SelectedIndex == 0 && !vm.Macros.Contains(macro), "delete macro from library");
+            using var library = JsonDocument.Parse(await File.ReadAllTextAsync(saved));
+            var item = library.RootElement.EnumerateArray().Single();
+            check("macro-delete-persisted-and-palette-updated", item.GetProperty("Name").GetString() == retained.Name &&
+                vm.AssignmentItems.All(m => m.Name != macro.Name), "The isolated library file and the macro list retain the other macro.");
+            check("macro-delete-preserves-physical-binding", !vm.HasError && replay.WriteStarts == writes &&
+                vm.StandardBindings[3].SelectedAction.Id == "keep" && ButtonBinding.IsMacro(vm.StandardBindings[3].Original),
+                "Deleting from the library removes its editable reference and leaves the programmed action available for explicit reassignment.");
+        }
+        finally { vm.DetachDiagnosticReplay(); }
+
+        IEnumerable<Button> DialogButtons() => VisualTreeHelper.GetOpenPopupsForXamlRoot(page.XamlRoot)
+            .Where(popup => popup.Child is not null).SelectMany(popup => Tree(popup.Child)).OfType<Button>();
+
+        async Task ChooseDialogButton(string label)
+        {
+            await Until(() => DialogButtons().Any(b => Equals(b.Content, label) && b.IsEnabled), "delete confirmation button");
+            var button = DialogButtons().Single(b => Equals(b.Content, label) && b.IsEnabled);
+            ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();
+        }
+    }
+
+    private static async Task VerifyOnboardLoopCadenceAsync(MainPage page, Controls.WorkspaceHost tabs, Action<string, bool, string> check)
+    {
+        var vm = page.ViewModel;
+        vm.LoadCatalogVerificationFixture(Core.Devices.MouseCatalog.ById("G502XPlus")!);
+        tabs.SelectedIndex = 0;
+        var replay = vm.AttachDiagnosticReplay();
+        try
+        {
+            page.BeginNewMacro();
+            var macro = vm.SelectedMacro!;
+            macro.Name = "标准延迟循环校验";
+            page.AdvanceNewMacroName();
+            page.ChooseNewMacroType(1);
+            macro.Script = "mouse 1 down\nmouse 1 up";
+            var standardDelay = Tree(page).OfType<CheckBox>().Single(b => Equals(b.Content, "使用标准延迟"));
+            standardDelay.IsChecked = true;
+            await Until(() => macro.UseStandardDelay, "standard-delay binding");
+            vm.MacroTarget = vm.StandardBindings[5];
+            vm.BindMacroCommand.Execute(null);
+            Invoke(page, "macro-save");
+            await Until(() => tabs.SelectedIndex == 0, "standard-delay macro save");
+
+            var readback = vm.CaptureDiagnosticContext().GetProperty("Snapshot").Deserialize(Profiles.ProfileJsonContext.Default.MemorySnapshot)!;
+            var binding = readback.GetProfiles().Single(p => p.Sector == readback.ActiveSector).GetBinding(5);
+            var location = new MacroLocation(ButtonBinding.MacroSector(binding), ButtonBinding.MacroOffset(binding));
+            var bytes = Convert.ToHexString(MacroAllocator.ReadMacroBytes(readback, location));
+            check("standard-delay-onboard-loop-readback", replay.WriteStarts > 0 && !vm.HasError && bytes == "41000140003242000140003202FF",
+                "The macro editor's 50 ms standard delay survives binding, saving and HID replay readback on both sides of the loop. " + bytes);
+        }
+        finally { vm.DetachDiagnosticReplay(); }
+    }
+
     private static async Task VerifyAnimationAsync(MainPage page, Func<string, Task> capture, Action<string, bool, string> check)
     {
-        var vm = page.ViewModel; var original = JsonSerializer.Serialize(vm.BuildLightsyncSettings());
+        var vm = page.ViewModel; var original = JsonSerializer.Serialize(vm.BuildLightsyncSettings(), Profiles.ProfileJsonContext.Default.LightingSettings);
         page.OpenAnimationEditor();
         check("animation-paused-frame-preview", vm.LedZones.Select((zone, i) => { var c = vm.SelectedAnimationFrame!.Colors[i].Scale(vm.LightsyncBrightness / 100); var preview = zone.PreviewBrush.Color; return c.R == preview.R && c.G == preview.G && c.B == preview.B; }).All(v => v), "Entering the paused editor renders the selected frame's actual colors, even when the preceding live preview showed another frame.");
         await capture("18-animation-editor");
@@ -57,7 +145,7 @@ internal static partial class UiVerification
         check("animation-reorder", ReferenceEquals(vm.AnimationFrames[3], moved), "The same reorder method used by the frame-drop handler moved the selected frame to slot 4; physical pointer dragging is not simulated.");
         Invoke(page, "animation-zoom-50"); vm.SeekAnimation(500); await capture("19-animation-edit-state");
         check("animation-zoom-and-seek", vm.AnimationZoom == 50 && vm.AnimationPlayhead == 500 && !vm.PlayLightsyncPreview, "50% zoom; paused playhead at 500ms; LED preview rendered at the seek position.");
-        Invoke(page, "animation-cancel"); check("animation-cancel-restores", JsonSerializer.Serialize(vm.BuildLightsyncSettings()) == original, "Cancel restored all frames, colors, curves, durations and direction.");
+        Invoke(page, "animation-cancel"); check("animation-cancel-restores", JsonSerializer.Serialize(vm.BuildLightsyncSettings(), Profiles.ProfileJsonContext.Default.LightingSettings) == original, "Cancel restored all frames, colors, curves, durations and direction.");
         page.OpenAnimationEditor(true); vm.AnimationName = "后台时间线校验"; Invoke(page, "animation-add-frame");
         Invoke(page, "animation-curve-InOutCubic"); vm.SelectedAnimationDirection = AnimationDirection.Bounce;
         vm.LightsyncColor = "#FF2277"; vm.PaintSelectedZonesCommand.Execute(null); vm.AnimationDefaultSpeed = 200;
@@ -65,7 +153,7 @@ internal static partial class UiVerification
         check("animation-playback-advances", vm.PlayLightsyncPreview && vm.AnimationPlayhead != before, "A running dispatcher timer advanced the playhead and rendered a later frame.");
         Invoke(page, "animation-play"); Invoke(page, "animation-save"); await Until(() => !vm.AnimationEditing, "animation-save");
         var path = Path.Combine(SettingsDirectory, "animations.json");
-        var saved = JsonSerializer.Deserialize<Dictionary<string, LightingSettings>>(await File.ReadAllTextAsync(path))!;
+        var saved = JsonSerializer.Deserialize(await File.ReadAllTextAsync(path), Profiles.ProfileJsonContext.Default.Animations)!;
         var animation = saved.Values.Single(s => s.Name == "后台时间线校验");
         check("animation-ui-save-persists", animation.Frames.Length == 2 && animation.Direction == AnimationDirection.Bounce && animation.DefaultFrameSpeed == 200 && animation.Frames[1].Colors.All(c => c.ToString() == "#FF2277"), "Saved animation JSON preserves both frames, eight LED colors, direction, transition and default speed.");
         page.OpenAnimationEditor(); check("animation-reload", vm.AnimationFrames.Count == 2 && vm.SelectedAnimationDirection == AnimationDirection.Bounce, "Reopening the saved animation restored its timeline.");
@@ -84,9 +172,9 @@ internal static partial class UiVerification
         page.OpenHeroEditor(); await capture("22-hero-intro"); Invoke(page, "hero-next"); await Until(() => page.HeroEditorState == "source", "hero-source"); await capture("23-hero-source");
         if (vm.AdvancedState?.CalibrationSupported == true)
         {
-            check("hero-software-mode-reads-calibration", vm.AdvancedState.Calibration is { DpiX: > 0, DpiY: > 0 }, System.Text.Json.JsonSerializer.Serialize(vm.AdvancedState));
+            check("hero-software-mode-reads-calibration", vm.AdvancedState.Calibration is { DpiX: > 0, DpiY: > 0 }, Core.Diagnostics.DiagnosticJson.Serialize(vm.AdvancedState));
             await capture("24-hero-calibration-ready");
-            await File.WriteAllTextAsync(Path.Combine(OutputDirectory, "hero-software-state.json"), JsonSerializer.Serialize(vm.AdvancedState, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(Path.Combine(OutputDirectory, "hero-software-state.json"), Core.Diagnostics.DiagnosticJson.Serialize(vm.AdvancedState, indented: true));
         }
         else
         {
@@ -147,7 +235,7 @@ internal static partial class UiVerification
             if (before.Mode == 1) await memory.ActivateProfileAsync(before.ActiveSector); else await memory.SetModeAsync(false);
             var restored = await memory.ReadAsync(); await OnboardMemory.SaveBackupAsync(restored, Path.Combine(folder, "restored.json"));
             var identical = before.Sectors.All(p => p.Value.SequenceEqual(restored.Sectors[p.Key])) && before.Mode == restored.Mode && before.ActiveSector == restored.ActiveSector;
-            await File.WriteAllTextAsync(Path.Combine(folder, "restoration.json"), JsonSerializer.Serialize(new { AllSectorsAndModeIdentical = identical }));
+            await File.WriteAllTextAsync(Path.Combine(folder, "restoration.json"), Core.Diagnostics.DiagnosticJson.Serialize(new { AllSectorsAndModeIdentical = identical }));
             check("automatic-write-test-restored", identical, "All original sectors, mode and active profile match the pre-test backup.");
         }
         await vm.ReadCommand.ExecuteAsync(null);

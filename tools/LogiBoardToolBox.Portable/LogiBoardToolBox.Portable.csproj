@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <ApplicationIcon>..\..\LogiBoardToolBox\LogiBoardToolBox\Assets\appicon.ico</ApplicationIcon>
+    <Product>罗技鼠标板载工具箱</Product>
+    <Description>罗技鼠标板载工具箱便携版</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(PortablePayload)" LogicalName="PortablePayload.zip" />
+  </ItemGroup>
+  <Target Name="RequirePortablePayload" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(PortablePayload)')" Text="Set PortablePayload to the published Native AOT application's ZIP file." />
+  </Target>
+</Project>

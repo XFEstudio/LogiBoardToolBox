@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="MoonSharp" Version="2.0.0" />
     <EmbeddedResource Include="Devices\mice.json" />
+    <EmbeddedResource Include="Devices\mice-extended.json" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="XFEExtension.NetCore" Version="5.2.1" />
     <PackageReference Include="XFEExtension.NetCore.AutoConfig" Version="4.1.2" />

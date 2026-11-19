@@ -115,20 +115,30 @@ public sealed partial class MainPage : Page
     }
     private void Assignment_ItemClick(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is not AssignmentItem item) return;
-        if (item.Category == "macros") { ViewModel.SelectedMacro = ViewModel.Macros.Single(m => m.Name == item.Value); WorkspaceTabs.SelectedIndex = 1; }
-        else ViewModel.AssignPaletteItemCommand.Execute(item);
+        if (e.ClickedItem is AssignmentItem item) OpenAssignmentItem(item);
+    }
+    internal void OpenAssignmentItem(AssignmentItem item)
+    {
+        if (item.Category != "macros") { ViewModel.AssignPaletteItemCommand.Execute(item); return; }
+        if (item.MacroIndex < 0 || item.MacroIndex >= ViewModel.Macros.Count ||
+            ViewModel.Macros[item.MacroIndex].Name != item.Value)
+        {
+            ViewModel.ShowError(new InvalidOperationException("宏列表已更新，请重新选择。"));
+            return;
+        }
+        ViewModel.SelectedMacro = ViewModel.Macros[item.MacroIndex];
+        WorkspaceTabs.SelectedIndex = 1;
     }
     private void Assignment_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
     {
         if (e.Items.FirstOrDefault() is not AssignmentItem item) return;
-        e.Data.SetText(JsonSerializer.Serialize(item)); e.Data.RequestedOperation = DataPackageOperation.Copy;
+        e.Data.SetText(JsonSerializer.Serialize(item, LogiBoardToolBox.Profiles.ProfileJsonContext.Default.AssignmentItem)); e.Data.RequestedOperation = DataPackageOperation.Copy;
     }
     private void MouseMap_AssignmentDropped(object? sender, MouseAssignmentDrop drop)
     {
         try
         {
-            var received = JsonSerializer.Deserialize<AssignmentItem>(drop.Data);
+            var received = JsonSerializer.Deserialize(drop.Data, LogiBoardToolBox.Profiles.ProfileJsonContext.Default.AssignmentItem);
             var item = ViewModel.AssignmentItems.FirstOrDefault(candidate => candidate == received);
             if (item is null) throw new FormatException("请从功能列表中拖动命令或宏。");
             ViewModel.SelectedButton = drop.Button; ViewModel.AssignPaletteItemCommand.Execute(item);
@@ -202,8 +212,12 @@ public sealed partial class MainPage : Page
     }
     private void MouseMap_ResetRequested(object? sender, ButtonBindingEditor row) { ViewModel.SelectedButton = row; ViewModel.ResetSelectedButtonCommand.Execute(null); }
     private void MouseMap_DisableRequested(object? sender, ButtonBindingEditor row) { ViewModel.SelectedButton = row; ViewModel.DisableSelectedButtonCommand.Execute(null); }
-    private void MouseMap_EditMacroRequested(object? sender, ButtonBindingEditor row) { ViewModel.SelectedMacro = ViewModel.Macros.FirstOrDefault(m => m.Name == row.Value); WorkspaceTabs.SelectedIndex = 1; }
-    private void WorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void MouseMap_EditMacroRequested(object? sender, ButtonBindingEditor row)
+    {
+        try { ViewModel.SelectedMacro = ViewModel.GetUniqueMacroForBinding(row.Value); WorkspaceTabs.SelectedIndex = 1; }
+        catch (InvalidOperationException error) { ViewModel.ShowError(error); }
+    }
+    private void WorkspaceTabs_SelectionChanged(object? sender, EventArgs e)
     {
         if (!ReferenceEquals(sender, WorkspaceTabs) || AssignmentsNav is null) return;
         if (WorkspaceTabs.SelectedIndex == 3) ViewModel.RefreshLightsyncBindings();
@@ -236,7 +250,13 @@ public sealed partial class MainPage : Page
         ViewModel.LightsyncEdited -= Lightsync_Edited; ViewModel.LightsyncEdited += Lightsync_Edited;
         previewTimer ??= DispatcherQueue.CreateTimer(); previewTimer.Interval = TimeSpan.FromMilliseconds(50);
         previewTimer.Tick -= Preview_Tick; previewTimer.Tick += Preview_Tick; previewTimer.Start();
-        if (Utilities.UiVerification.IsCatalogRequested) { await Utilities.UiVerification.RunCatalogReviewAsync(this, WorkspaceTabs); return; }
+        if (Utilities.UiVerification.IsCatalogRequested)
+        {
+            UpdateCategoryButtons();
+            UpdateLightTabs();
+            await Utilities.UiVerification.RunCatalogReviewAsync(this, WorkspaceTabs);
+            return;
+        }
         await ViewModel.InitializeAsync();
         UpdateCategoryButtons();
         UpdateLightTabs();

@@ -4,7 +4,8 @@ using LogiBoardToolBox.Core.Onboard;
 
 namespace LogiBoardToolBox.ViewModels;
 
-public sealed class EditorChoice(string id, string label)
+[WinRT.GeneratedBindableCustomProperty([nameof(EditorChoice.Label)], [])]
+public sealed partial class EditorChoice(string id, string label)
 {
     public string Id { get; } = id;
     public string Label { get; } = label;
@@ -17,7 +18,7 @@ public partial class DpiStageEditor : ObservableObject
     public int Slot => Index + 1;
     public string Label => $"DPI {Index + 1}";
     [ObservableProperty] public partial bool IsAdvanced { get; set; }
-    [ObservableProperty] public partial bool IsSelected { get; set; }
+    [ObservableProperty] public partial bool IsCurrent { get; set; }
     [ObservableProperty] public partial string Value { get; set; } = "800";
     [ObservableProperty] public partial string ValueY { get; set; } = "800";
     [ObservableProperty] public partial bool Enabled { get; set; } = true;
@@ -126,10 +127,11 @@ public partial class ButtonBindingEditor : ObservableObject
     public override string ToString() => (GShift ? "G-Shift · " : "普通 · ") + Label;
 }
 
+[WinRT.GeneratedBindableCustomProperty]
 public partial class MacroEditor : ObservableObject
 {
-    public static IReadOnlyList<EditorChoice> RepeatChoices { get; } =
-        [new("0", "不重复"), new("1", "按住时重复"), new("2", "触发"), new("3", "序列")];
+    public static List<EditorChoice> RepeatChoices { get; } =
+        [new("0", "不重复"), new("1", "按住时重复"), new("2", "触发"), new("3", "序列"), new("4", "持续循环")];
     public IReadOnlyList<EditorChoice> Repeats => RepeatChoices;
     [ObservableProperty] public partial string Name { get; set; } = "复制并粘贴";
     [ObservableProperty] public partial string Script { get; set; } = "tap Ctrl+C\ndelay 80\ntap Ctrl+V";

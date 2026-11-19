@@ -9,10 +9,13 @@ public sealed record OnboardCapabilities(byte MemoryModel, byte ProfileFormat, b
     // LBT binding-action 3, revision 2, is declared by our hash-bound MCU patch.
     // It is never inferred from the model name, opcode 03, or a UI selection.
     public byte NativeToggleVersion { get; private init; }
-    public bool SupportsNativeToggle => NativeToggleVersion == 2 && MemoryModel == 1 && ProfileFormat == 2 &&
+    public byte NativeLuaVersion { get; private init; }
+    private bool HasResearchGeometry => MemoryModel == 1 && ProfileFormat == 2 &&
         MacroFormat == 1 && ProfileCount == 5 && FactoryProfileCount == 5 && ButtonCount == 11 &&
         SectorCount == 16 && SectorSize == 256 && MechanicalLayout == 0x0A && VariousInfo == 1;
-    public bool HasSameMacroExecution(OnboardCapabilities other) => SupportsNativeToggle == other.SupportsNativeToggle;
+    public bool SupportsNativeToggle => (NativeToggleVersion == 2 || NativeLuaVersion == 1) && HasResearchGeometry;
+    public bool SupportsNativeLua => NativeLuaVersion == 1 && HasResearchGeometry;
+    public bool HasSameMacroExecution(OnboardCapabilities other) => SupportsNativeToggle == other.SupportsNativeToggle && SupportsNativeLua == other.SupportsNativeLua;
     public bool HasGShift => (MechanicalLayout & 3) == 2;
     public bool HasDpiShift => ((MechanicalLayout >> 2) & 3) == 2;
     // Format 10 is observed on this G502 X PLUS, not yet covered by upstream codecs.
@@ -23,8 +26,7 @@ public sealed record OnboardCapabilities(byte MemoryModel, byte ProfileFormat, b
     public bool HasIndependentAxes => UsesAdvancedProfile || IsExperimental;
     public bool HasSeparateRates => HasIndependentAxes;
     public bool CanEditPerformance => CanEditProfiles;
-    // Format 7's LED block positions are known, but this app's persistent-effect
-    // serializer has not been checked against that generation's native effects.
+    // Format 7 active RGB records require the device's 0x8071 cluster and effect descriptors.
     public bool CanEditLighting => CanEditProfiles && ProfileFormat >= 2 && !UsesAdvancedProfile;
     public int BindingRecordCount => IsExperimental ? 13 : UsesAdvancedProfile ? 12 : 16;
     public int AssignableButtonCount => IsExperimental ? Math.Min(BindingRecordCount, ButtonCount + 2) : ButtonCount;
@@ -36,10 +38,19 @@ public sealed record OnboardCapabilities(byte MemoryModel, byte ProfileFormat, b
         SectorSize is >= 254 and <= 4096 && ButtonCount is > 0 and <= 16 &&
         ProfileCount is > 0 and <= 16 && SectorCount > ProfileCount && (ProfileCount + 1) * 4 + 2 <= SectorSize;
     public bool CanWriteMacros => CanEditProfiles && MacroFormat == 1 && SectorCount > ProfileCount + 1;
-    // Captured HERO (256 bytes) and G402 (1024 bytes): profile/directory pages
-    // have CRCs, macro pages are raw streams. Never infer this from a bad CRC.
+    // Some G304/G305 firmware reports six sectors but rejects addresses 3–5.
+    // The read results must also confirm the boundary before treating it as smaller.
+    internal bool HasG305StorageGeometry => MemoryModel == 1 && ProfileFormat == 3 && MacroFormat == 1 &&
+        ProfileCount == 1 && FactoryProfileCount == 1 && ButtonCount == 6 && SectorCount == 6 &&
+        SectorSize == 255 && MechanicalLayout == 0x0A && VariousInfo == 2;
+    // Captured HERO (256), G402 (1024), G502 LIGHTSPEED and G102 LIGHTSYNC (255):
+    // profile/directory pages have CRCs; macro pages are raw format-1 streams
+    // with full-address continuation records. Match the reported geometry,
+    // never infer this from a bad CRC or erase/reseal a captured macro page.
     public bool UsesLegacyMacroPages => MemoryModel == 1 && MacroFormat == 1 && MechanicalLayout == 0x0A &&
         (ProfileFormat == 2 && SectorSize == 256 && ProfileCount == 5 && FactoryProfileCount == 5 && ButtonCount == 11 && SectorCount == 16 ||
+         ProfileFormat == 3 && SectorSize == 255 && ProfileCount == 5 && FactoryProfileCount == 1 && ButtonCount == 11 && SectorCount == 16 && VariousInfo == 4 ||
+         ProfileFormat == 4 && SectorSize == 255 && ProfileCount == 1 && FactoryProfileCount == 1 && ButtonCount == 6 && SectorCount == 16 && VariousInfo == 1 ||
          ProfileFormat == 1 && SectorSize == 1024 && ProfileCount == 1 && FactoryProfileCount == 1 && ButtonCount == 8 && SectorCount == 3);
     public bool IsRawMacroSector(int sector) => UsesLegacyMacroPages && sector > ProfileCount && sector < SectorCount;
     public int MacroPageCapacity => SectorSize - (UsesLegacyMacroPages ? 0 : 2);
@@ -54,6 +65,8 @@ public sealed record OnboardCapabilities(byte MemoryModel, byte ProfileFormat, b
             BinaryPrimitives.ReadUInt16BigEndian(bytes[7..]), bytes[9], bytes[10])
         {
             NativeToggleVersion = bytes.Length >= 16 && bytes.Slice(11, 4).SequenceEqual(new byte[] { 0x4C, 0x42, 0x54, 3 })
+                ? bytes[15] : (byte)0,
+            NativeLuaVersion = bytes.Length >= 16 && bytes.Slice(11, 4).SequenceEqual(new byte[] { 0x4C, 0x42, 0x54, 4 })
                 ? bytes[15] : (byte)0
         };
     }

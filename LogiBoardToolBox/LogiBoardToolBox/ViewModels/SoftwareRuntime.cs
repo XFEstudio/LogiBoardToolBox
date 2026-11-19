@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LogiBoardToolBox.Core.Diagnostics;
 using LogiBoardToolBox.Core.HidPlusPlus;
 using LogiBoardToolBox.Core.Macros;
 using LogiBoardToolBox.Core.Windows;
@@ -119,6 +120,11 @@ public partial class MainPageViewModel
         await using var runtime = new MacroRuntime(new TraceSink(e => { lock (trace) if (trace.Count < 100) trace.Add($"{time.ElapsedMilliseconds,5} ms  {e.Kind} {e.Code}{(e.Kind is MacroInputKind.Key or MacroInputKind.MouseButton or MacroInputKind.Consumer ? e.Down ? " ↓" : " ↑" : "")}"); }));
         var play = runtime.Press("test", program); await Task.Delay(300); runtime.Release("test");
         if (program.Repeat == MacroRepeat.Toggle) _ = runtime.Press("test", program);
+        if (program.Repeat == MacroRepeat.Continuous)
+        {
+            await Task.Delay(300);
+            await runtime.StopAllAsync();
+        }
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
         try { await play.WaitAsync(timeout.Token); } catch (OperationCanceledException) { await runtime.StopAllAsync(); trace.Add("模拟超过 4 秒，已停止并释放按键。"); }
         MacroExecutionTrace = string.Join('\n', trace);
@@ -131,8 +137,8 @@ public partial class MainPageViewModel
             AllBindings.Where(b => b.SelectedAction.Id == "macro").Select(b => new SoftwareAssignment(b.Index, b.GShift, b.Value)).ToArray(), BuildLightsyncSettings());
         Directory.CreateDirectory(dataDirectory);
         var path = SoftwareSettingsPath();
-        await File.WriteAllTextAsync(path + ".tmp", JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true })); File.Move(path + ".tmp", path, true);
-        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "macros.json"), JsonSerializer.Serialize(Macros.Select(m => new SavedMacro(m.Name, m.Script, m.Repeat, m.HoldScript, m.ReleaseScript, m.UseStandardDelay, m.StandardDelay, m.ShowUpDown, m.Color)), new JsonSerializerOptions { WriteIndented = true }));
+        await File.WriteAllTextAsync(path + ".tmp", JsonSerializer.Serialize(saved, SettingsJsonContext.Default.SoftwareSettings)); File.Move(path + ".tmp", path, true);
+        await WriteMacroLibraryAsync();
         Log("软件配置已保存；启动时不会自动接管鼠标。");
     }
     private string SoftwareSettingsPath() => Path.Combine(dataDirectory, "software-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(SelectedDevice!.Identity)))[..12] + $"-{SelectedProfile!.Sector}.json");
@@ -143,13 +149,17 @@ public partial class MainPageViewModel
         var path = SoftwareSettingsPath();
         if (!File.Exists(path)) throw new FileNotFoundException("此配置槽还没有保存的软件配置。");
         if (new FileInfo(path).Length > 1024 * 1024) throw new InvalidDataException("软件配置文件过大。");
-        var saved = JsonSerializer.Deserialize<SoftwareSettings>(await File.ReadAllTextAsync(path)) ?? throw new InvalidDataException("软件配置文件无效。");
+        var saved = JsonSerializer.Deserialize(await File.ReadAllTextAsync(path), SettingsJsonContext.Default.SoftwareSettings) ?? throw new InvalidDataException("软件配置文件无效。");
         if (saved.DeviceIdentity != SelectedDevice.Identity || saved.Sector != SelectedProfile.Sector) throw new InvalidDataException("软件配置不属于当前鼠标和配置槽。");
         saved.Lighting.Validate();
         foreach (var binding in saved.Bindings)
         {
             var row = AllBindings.FirstOrDefault(b => b.Index == binding.Button && b.GShift == binding.GShift) ?? throw new InvalidDataException("软件配置包含无效按键。");
-            if (!Macros.Any(m => m.Name == binding.Macro)) throw new InvalidDataException("宏库中缺少：" + binding.Macro);
+            if (!Macros.Any(m => m.Name == binding.Macro))
+            {
+                DiagnosticLog.Record("macro-library", "missing software assignment skipped", new { binding.Button, binding.GShift, binding.Macro });
+                continue;
+            }
             row.SelectedAction = ButtonBindingEditor.ActionChoices.Single(c => c.Id == "macro"); row.Value = binding.Macro; row.FriendlyName = binding.Macro;
         }
         LoadLightsyncSettings(saved.Lighting);

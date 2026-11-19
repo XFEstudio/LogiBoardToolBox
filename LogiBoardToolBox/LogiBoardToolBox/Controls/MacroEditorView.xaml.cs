@@ -46,12 +46,17 @@ public sealed partial class MacroEditorView : UserControl
     }
     private MacroEditor? watched;
     private void WatchMacro(MacroEditor? old, MacroEditor? next) { if (old is not null) old.PropertyChanged -= MacroChanged; watched = next; if (next is not null) next.PropertyChanged += MacroChanged; UpdateTypes(); }
-    private void Changed(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(ViewModel.SelectedMacro)) WatchMacro(watched, ViewModel.SelectedMacro); }
+    private void Changed(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ViewModel.SelectedMacro)) WatchMacro(watched, ViewModel.SelectedMacro);
+        if (e.PropertyName == nameof(ViewModel.IsRecording)) DeleteButton.IsEnabled = ViewModel.SelectedMacro is not null && !ViewModel.IsRecording;
+    }
     private void MacroChanged(object? sender, PropertyChangedEventArgs e) => UpdateTypes();
     private void UpdateTypes()
     {
-        foreach (var button in new[] { OnceType, RepeatType, ToggleType, SequenceType }) { var selected = button.Tag.ToString() == ViewModel.SelectedMacro?.SelectedRepeat.Id; button.BorderBrush = new SolidColorBrush(selected ? Windows.UI.Color.FromArgb(255, 0, 169, 224) : Windows.UI.Color.FromArgb(255, 68, 68, 68)); button.Background = new SolidColorBrush(selected ? Windows.UI.Color.FromArgb(255, 0, 42, 54) : Windows.UI.Color.FromArgb(255, 24, 24, 24)); }
+        foreach (var button in new[] { OnceType, RepeatType, ToggleType, SequenceType, ContinuousType }) { var selected = button.Tag.ToString() == ViewModel.SelectedMacro?.SelectedRepeat.Id; button.BorderBrush = new SolidColorBrush(selected ? Windows.UI.Color.FromArgb(255, 0, 169, 224) : Windows.UI.Color.FromArgb(255, 68, 68, 68)); button.Background = new SolidColorBrush(selected ? Windows.UI.Color.FromArgb(255, 0, 42, 54) : Windows.UI.Color.FromArgb(255, 24, 24, 24)); }
         var current = ViewModel.SelectedMacro;
+        DeleteButton.IsEnabled = current is not null && !ViewModel.IsRecording;
         SaveButton.IsEnabled = current is not null && !string.IsNullOrWhiteSpace(current.Name) && (!string.IsNullOrWhiteSpace(current.Script) || !string.IsNullOrWhiteSpace(current.HoldScript) || !string.IsNullOrWhiteSpace(current.ReleaseScript)) && (original is null || original != MacroDraft.Read(current));
         ResetButton.IsEnabled = current is not null && (original is null ? !string.IsNullOrEmpty(current.Script + current.HoldScript + current.ReleaseScript) : original != MacroDraft.Read(current));
     }
@@ -88,6 +93,27 @@ public sealed partial class MacroEditorView : UserControl
     private void MacroColor_Changed(ColorPicker sender, ColorChangedEventArgs e) { if (ViewModel.SelectedMacro is { } macro) macro.Color = $"#{e.NewColor.R:X2}{e.NewColor.G:X2}{e.NewColor.B:X2}"; }
     private void Reset_Click(object sender, RoutedEventArgs e) { if (original is not null && ViewModel.SelectedMacro is { } macro) original.Restore(macro); else if (created is not null) { created.Script = ""; created.HoldScript = ""; created.ReleaseScript = ""; } }
     private async void Save_Click(object sender, RoutedEventArgs e) => await Save();
+    private async void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedMacro is not { } macro || ViewModel.IsRecording) return;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "删除宏",
+            Content = new TextBlock
+            {
+                Text = $"从宏库删除「{macro.Name}」？\n如需解除鼠标上的板载分配，可在按键分配页重设对应按键。",
+                TextWrapping = TextWrapping.Wrap
+            },
+            PrimaryButtonText = "删除",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || !await ViewModel.DeleteMacroFromLibraryAsync(macro)) return;
+        created = null;
+        original = null;
+        Closed?.Invoke(this, EventArgs.Empty);
+    }
     private async void ExportLua_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -103,10 +129,17 @@ public sealed partial class MacroEditorView : UserControl
     private async Task Save()
     {
         if (ViewModel.IsRecording) RecordRequested?.Invoke(this, EventArgs.Empty);
-        if (original is { } before && ViewModel.SelectedMacro is { } current && before.Name != current.Name)
-            foreach (var row in ViewModel.AllBindings.Where(r => r.SelectedAction.Id == "macro" && r.Value == before.Name)) { row.Value = current.Name; row.FriendlyName = current.Name; }
+        var retry = ViewModel.OnboardSaveFailed && ViewModel.CanRetryOnboardSave;
         await ViewModel.SaveMacrosCommand.ExecuteAsync(null);
-        await ViewModel.FlushImmediateSaveAsync();
+        if (!ViewModel.HasError)
+        {
+            try
+            {
+                if (retry) await ViewModel.RetryOnboardSaveAsync();
+                else await ViewModel.FlushImmediateSaveAsync();
+            }
+            catch (Core.Onboard.ImmediateSaveException error) { ViewModel.ShowError(error); return; }
+        }
         if (!ViewModel.HasError) { created = null; original = null; Closed?.Invoke(this, EventArgs.Empty); }
     }
 }

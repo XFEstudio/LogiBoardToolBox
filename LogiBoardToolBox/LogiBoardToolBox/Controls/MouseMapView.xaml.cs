@@ -12,8 +12,24 @@ namespace LogiBoardToolBox.Controls;
 
 public sealed partial class MouseMapView : UserControl
 {
+    // Coordinates are normalized to the classic G502 front images. The index is the 0x8100 binding record.
+    private static readonly (int Index, double X, double Y, double LabelX, double LabelY)[] ClassicG502Points =
+    [
+        (0, 372, 220, 416, 242), // G1
+        (7, 210, 300, 416, 300), // G8
+        (10, 445, 322, 416, 383), // Wheel tilt left
+        (6, 210, 366, 416, 411), // G7
+        (5, 142, 408, 416, 459), // G6
+        (4, 151, 518, 416, 513), // G5
+        (3, 198, 639, 416, 566), // G4
+        (1, 775, 222, 906, 242), // G2
+        (2, 576, 320, 906, 305), // G3
+        (9, 708, 322, 906, 382), // Wheel tilt right
+        (8, 585, 518, 906, 473), // G9
+    ];
     private List<ButtonBindingEditor> observed = [];
     private INotifyCollectionChanged? observedCollection;
+    private readonly HashSet<string> failedArtwork = new(StringComparer.Ordinal);
     public static readonly DependencyProperty BindingsProperty = DependencyProperty.Register(nameof(Bindings), typeof(object), typeof(MouseMapView), new PropertyMetadata(null, Changed));
     public static readonly DependencyProperty IsSideViewProperty = DependencyProperty.Register(nameof(IsSideView), typeof(bool), typeof(MouseMapView), new PropertyMetadata(false, Changed));
     public static readonly DependencyProperty SelectedButtonProperty = DependencyProperty.Register(nameof(SelectedButton), typeof(object), typeof(MouseMapView), new PropertyMetadata(null, Changed));
@@ -30,6 +46,17 @@ public sealed partial class MouseMapView : UserControl
     public MouseMapView()
     {
         InitializeComponent();
+        foreach (var image in new[] { TopModelImage, ModelImage, SideView })
+        {
+            image.ImageOpened += (_, _) => Draw();
+            image.ImageFailed += (sender, error) =>
+            {
+                if (sender is not Image failed || failed.Source is not BitmapImage bitmap || bitmap.UriSource is null) return;
+                failedArtwork.Add(bitmap.UriSource.AbsoluteUri);
+                Core.Diagnostics.DiagnosticLog.Record("device-artwork", "image failed", new { Model = DeviceModel?.Id, Asset = bitmap.UriSource.AbsoluteUri, error.ErrorMessage });
+                Draw();
+            };
+        }
         Unloaded += (_, _) =>
         {
             Unsubscribe();
@@ -63,15 +90,22 @@ public sealed partial class MouseMapView : UserControl
         var labelScale = 1 / Math.Clamp(Math.Min(ActualWidth / 1500, ActualHeight / 1000), .55, 1);
         var model = DeviceModel ?? MouseCatalog.Unknown;
         var originalLayout = model.Layout == "G502X";
-        TopView.Visibility = originalLayout && !IsSideView ? Visibility.Visible : Visibility.Collapsed;
-        SideView.Visibility = originalLayout && IsSideView ? Visibility.Visible : Visibility.Collapsed;
+        var classicLayout = model.Layout == "G502Classic";
         var hasImage = model.IsKnown && !string.IsNullOrWhiteSpace(model.ImageAsset);
-        ModelImage.Visibility = !originalLayout && hasImage ? Visibility.Visible : Visibility.Collapsed;
-        GenericSilhouette.Visibility = !originalLayout && !hasImage ? Visibility.Visible : Visibility.Collapsed;
-        if (!originalLayout && hasImage)
+        var sideView = originalLayout && IsSideView && model.HasSideView;
+        var asset = sideView ? model.SideImageAsset! : model.ImageAsset;
+        var uri = hasImage ? new Uri("ms-appx:///" + asset.TrimStart('/')) : null;
+        var available = uri is not null && !failedArtwork.Contains(uri.AbsoluteUri);
+        TopView.Visibility = originalLayout && !sideView && available ? Visibility.Visible : Visibility.Collapsed;
+        SideView.Visibility = sideView && available ? Visibility.Visible : Visibility.Collapsed;
+        ModelImage.Visibility = !originalLayout && available ? Visibility.Visible : Visibility.Collapsed;
+        GenericSilhouette.Visibility = !available ? Visibility.Visible : Visibility.Collapsed;
+        ArtworkHint.Visibility = !available ? Visibility.Visible : Visibility.Collapsed;
+        ArtworkHint.Text = model.IsKnown ? "设备图片未能加载" : "型号待识别 · 通用按键示意";
+        if (available)
         {
-            var uri = new Uri("ms-appx:///" + model.ImageAsset.TrimStart('/'));
-            if (ModelImage.Source is not BitmapImage current || current.UriSource != uri) ModelImage.Source = new BitmapImage(uri);
+            var target = originalLayout ? sideView ? SideView : TopModelImage : ModelImage;
+            if (target.Source is not BitmapImage current || current.UriSource != uri) target.Source = new BitmapImage(uri);
             ModelImage.Width = 435 * model.ImageAspect;
         }
         // Registration points from the installed G502 X PLUS device metadata.
@@ -81,13 +115,15 @@ public sealed partial class MouseMapView : UserControl
          (9,300,500,416,287), (10,250,950,416,394), (12,800,500,750,200), (11,800,850,416,448)];
         (int Index, double X, double Y, double LabelX, double LabelY)[] side =
         [(3,580,1800,420,535), (4,260,1000,420,362), (5,500,1400,420,448)];
-        var points = originalLayout ? (IsSideView ? side : top) : ModelPoints(model);
-        var imageWidth = originalLayout ? (IsSideView ? 179.74 : 258.28125) : 435 * model.ImageAspect;
+        if (originalLayout && !model.HasSideView)
+            top = [.. top, (5,210,1160,416,502), (3,205,1420,416,556), (4,100,1680,416,610)];
+        var points = originalLayout ? (sideView ? side : top) : classicLayout && available ? ClassicG502Points : ModelPoints(model);
+        var imageWidth = originalLayout ? (sideView ? 179.74 : 258.28125) : 435 * model.ImageAspect;
         var imageOriginX = (1500 - imageWidth) / 2;
         foreach (var point in points)
         {
             var row = observed.FirstOrDefault(r => r.Index == point.Index); if (row is null) continue;
-            var px = imageOriginX + point.X / (originalLayout ? IsSideView ? 936 : 1391 : 1000) * imageWidth;
+            var px = imageOriginX + point.X / (originalLayout ? sideView ? 936 : 1391 : 1000) * imageWidth;
             var py = 254 + point.Y / (originalLayout ? 2700 : 1000) * 435;
             var selected = ReferenceEquals(SelectedButton, row);
             var color = ColorHelper.FromArgb(255, 80, 80, 80);
@@ -111,6 +147,11 @@ public sealed partial class MouseMapView : UserControl
             if (model.Layout == "Ambidextrous" && row.Index == 5) display = "底部 · " + display;
             ToolTipService.SetToolTip(marker, row.Label + " · " + display);
             ToolTipService.SetToolTip(label, row.Label + " · " + display);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(marker, row.Label + " · " + display);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(label, row.Label + " · " + display);
+            if ((model.Layout == "Compact" && row.Index is 3 or 4) || (originalLayout && !model.HasSideView && row.Index is 3 or 4 or 5) ||
+                (classicLayout && row.Index is >= 3 and <= 8))
+                display = $"G{row.Index + 1} · {display}";
             if (row.Index is 11 or 12 && display == "未分配") display = row.Index == 11 ? "向下滚动" : "向上滚动";
             var text = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
             if (row.SelectedAction.Id == "macro" || Core.Onboard.ButtonBinding.IsMacro(row.Original))

@@ -29,8 +29,9 @@ public partial class MainPageViewModel
     public bool HasRgbLighting => lightingCapabilities is { } lighting ? lighting.ZoneCount > 0 : DeviceModel.HasLighting;
     public string ModelSupportNote => !DeviceModel.IsKnown ? "按设备能力读取；型号专属图与 G HUB 槽位尚未适配。"
         : DeviceModel.Id == "G502XPlus" ? "G502 X PLUS 板载宏已在本机实测。"
+        : DeviceModel.ButtonNames.Length == 0 ? "已识别型号与设备图；按键数量和板载功能以设备读取结果为准。"
         : "已按型号适配；此型号的板载执行仍需对应实机验证。";
-    public IEnumerable<EditorChoice> AvailableLightsyncEffects => LightsyncEffects.Where(e => e.Id != "Signature" || DeviceModel.Layout == "G502X");
+    public List<EditorChoice> AvailableLightsyncEffects => LightsyncEffects.Where(e => e.Id != "Signature" || DeviceModel.Layout == "G502X").ToList();
     private void NotifyDeviceModel()
     {
         foreach (var property in new[] { nameof(DeviceModel), nameof(DeviceConnectionText), nameof(DeviceImageAsset), nameof(DeviceImageSource), nameof(HasModelSideView), nameof(HasRgbLighting), nameof(ModelSupportNote), nameof(AvailableLightsyncEffects) }) OnPropertyChanged(property);

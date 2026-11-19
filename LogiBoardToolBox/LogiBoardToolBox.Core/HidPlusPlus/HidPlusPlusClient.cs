@@ -20,6 +20,7 @@ public sealed class HidPlusPlusClient(IHidTransport transport, byte deviceIndex)
     private TaskCompletionSource<byte[]>? pending;
     private byte pendingFeature, pendingAddress;
     private Exception? readError;
+    public bool HasConnectionError { get { lock (sync) return readError is not null; } }
     public event EventHandler<HidNotification>? Notification;
     public event EventHandler<Exception>? Disconnected;
     public byte DeviceIndex { get; } = deviceIndex;
@@ -64,7 +65,7 @@ public sealed class HidPlusPlusClient(IHidTransport transport, byte deviceIndex)
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 DiagnosticLog.Record("hid-error", "timeout", new { DeviceIndex, featureIndex, function, address, Parameters = Convert.ToHexString(parameters) });
-                throw new TimeoutException($"设备 {DeviceIndex:X2} 没有回应。请唤醒鼠标；如果 G HUB 正在配置设备，请先退出 G HUB。");
+                throw new TimeoutException("鼠标未响应。唤醒或重新连接鼠标后可重试。");
             }
             catch (Exception error)
             {
@@ -83,6 +84,9 @@ public sealed class HidPlusPlusClient(IHidTransport transport, byte deviceIndex)
         features[id] = reply[0];
         return reply[0];
     }
+
+    public bool IsNotificationFor(ushort feature, HidNotification notification)
+        => features.TryGetValue(feature, out var index) && index != 0 && index == notification.FeatureIndex;
 
     public async Task<byte[]> FeatureAsync(ushort id, byte function, byte[]? parameters = null, CancellationToken ct = default)
     {
@@ -149,8 +153,9 @@ public sealed class HidPlusPlusClient(IHidTransport transport, byte deviceIndex)
         catch (Exception ex)
         {
             DiagnosticLog.Record("hid-error", "reader disconnected", new { DeviceIndex }, ex);
-            lock (sync) { readError = ex; pending?.TrySetException(ex); }
-            Disconnected?.Invoke(this, ex);
+            var connectionError = ex is IOException ? ex : new IOException("鼠标 HID 接口连接已中断。", ex);
+            lock (sync) { readError = connectionError; pending?.TrySetException(connectionError); }
+            Disconnected?.Invoke(this, connectionError);
         }
     }
     private void TraceReport(string direction, byte[] report)

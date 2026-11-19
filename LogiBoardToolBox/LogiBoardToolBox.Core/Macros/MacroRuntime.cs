@@ -15,7 +15,7 @@ public sealed record MacroProgram(MacroRepeat Repeat, IReadOnlyList<byte[]> Pres
         var output = Press.Select(b => b.ToArray()).ToList();
         if (Repeat == MacroRepeat.Sequence) { output.Add([1]); output.AddRange(Release); }
         else if (Repeat == MacroRepeat.WhileHeld) output.Add([2]);
-        else if (Repeat == MacroRepeat.Toggle) output.Add([3]);
+        else if (Repeat is MacroRepeat.Toggle or MacroRepeat.Continuous) output.Add([3]);
         output.Add([0xFF]);
         return new(output, Repeat);
     }
@@ -108,7 +108,7 @@ public sealed class MacroRuntime(IMacroInputSink sink) : IAsyncDisposable
                 foreach (var input in baseline.Except(run.Held).ToArray()) SetKey(run, input.Kind, input.Code, true);
                 await PlayAsync(p.Release, run, run.Cancel.Token).ConfigureAwait(false);
             }
-            else if (p.Repeat is MacroRepeat.WhileHeld or MacroRepeat.Toggle)
+            else if (p.Repeat is MacroRepeat.WhileHeld or MacroRepeat.Toggle or MacroRepeat.Continuous)
                 while (!run.Cancel.IsCancellationRequested)
                 {
                     await Task.Delay(1, run.Cancel.Token).ConfigureAwait(false);

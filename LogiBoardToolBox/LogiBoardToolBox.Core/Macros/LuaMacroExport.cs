@@ -2,25 +2,30 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace LogiBoardToolBox.Core.Macros;
 
 /// <summary>Exports standalone G HUB Lua. Canonical metadata is accepted only when the entire generated source still matches.</summary>
-public static class LuaMacroExport
+public static partial class LuaMacroExport
 {
     private const string Header = "-- LogiBoardToolBox Lua Export v1\n";
     private const string MetadataPrefix = "-- LBX-META:";
     private const string ChecksumPrefix = "-- LBX-SHA256:";
     private sealed record Envelope(int Version, string Name, int Trigger, MacroRepeat Repeat, byte[][] Press, byte[][] Hold, byte[][] Release);
+    [JsonSerializable(typeof(Envelope))]
+    private sealed partial class LuaExportJsonContext : JsonSerializerContext;
     public static string Export(string name, MacroProgram program, int triggerButton = 1)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (triggerButton is < 1 or > 5) throw new ArgumentOutOfRangeException(nameof(triggerButton));
         if (!Enum.IsDefined(program.Repeat)) throw new ArgumentOutOfRangeException(nameof(program));
         if (name is null || name.Length > 256) throw new ArgumentException("宏名称不能超过 256 字符。", nameof(name));
-        if (program.InstructionCount is < 1 or > 10000) throw new FormatException("待导出的宏指令数应为 1–10,000。");
+        if (program.InstructionCount == 0) throw new FormatException("请先添加宏步骤。");
+        var continuous = program.Repeat == MacroRepeat.Continuous;
+        var stopButton = triggerButton == 5 ? 4 : 5;
         var envelope = new Envelope(1, name, triggerButton, program.Repeat, Copy(program.Press), Copy(program.Hold), Copy(program.Release));
-        var json = JsonSerializer.SerializeToUtf8Bytes(envelope);
+        var json = JsonSerializer.SerializeToUtf8Bytes(envelope, LuaExportJsonContext.Default.Envelope);
         var source = new StringBuilder(Header)
             .Append("-- ").AppendLine(name.Replace('\r', ' ').Replace('\n', ' '))
             .AppendLine("-- Standalone G HUB Lua; buttons: 1 left, 2 middle, 3 right.")
@@ -29,10 +34,12 @@ public static class LuaMacroExport
             .AppendLine("EnablePrimaryMouseButtonEvents(true)")
             .AppendLine($"local __lb_trigger = {triggerButton}")
             .AppendLine($"local __lb_mode = {(int)program.Repeat}")
+            .Append(continuous ? $"local __lb_stop = {stopButton} -- Press this mouse button to stop the continuous loop.\n" : "")
             .AppendLine("local __lb_keys, __lb_mouse = {}, {}")
             .AppendLine("local __lb_active, __lb_last, __lb_released, __lb_cancel = false, true, false, false")
             .AppendLine("local __lb_ignore, __lb_phase = 0, 'press'")
             .AppendLine("local function __lb_poll()")
+            .Append(continuous ? "  if IsMouseButtonPressed(__lb_stop) then return false end\n" : "")
             .AppendLine("  local down = IsMouseButtonPressed(__lb_trigger)")
             .AppendLine("  if __lb_last and not down then __lb_released = true end")
             .AppendLine("  if not __lb_last and down then")
@@ -87,7 +94,7 @@ public static class LuaMacroExport
             .AppendLine("    __lb_restore(baselineKeys, baselineButtons)")
             .AppendLine("    __lb_phase='release'")
             .AppendLine("    __lb_release()")
-            .AppendLine("  elseif (__lb_mode == 1 or __lb_mode == 2) and ok then")
+            .AppendLine(continuous ? "  elseif __lb_mode == 4 and ok then" : "  elseif (__lb_mode == 1 or __lb_mode == 2) and ok then")
             .AppendLine("    while __lb_sleep(1) do if not __lb_press() then break end end")
             .AppendLine("  end")
             .AppendLine("  __lb_restore({}, {})")
@@ -151,8 +158,8 @@ public static class LuaMacroExport
         try
         {
             var json = System.Convert.FromBase64String(lines[^3][MetadataPrefix.Length..]);
-            if (json.Length > 262144 || !string.Equals(System.Convert.ToHexString(SHA256.HashData(json)), lines[^2][ChecksumPrefix.Length..], StringComparison.OrdinalIgnoreCase)) return false;
-            envelope = JsonSerializer.Deserialize<Envelope>(json);
+            if (!string.Equals(System.Convert.ToHexString(SHA256.HashData(json)), lines[^2][ChecksumPrefix.Length..], StringComparison.OrdinalIgnoreCase)) return false;
+            envelope = JsonSerializer.Deserialize(json, LuaExportJsonContext.Default.Envelope);
             if (envelope is null || envelope.Version != 1 || envelope.Press is null || envelope.Hold is null || envelope.Release is null || envelope.Trigger != trigger) return false;
         }
         catch (Exception error) when (error is FormatException or JsonException) { return false; }

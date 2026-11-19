@@ -13,7 +13,7 @@ internal static partial class UiVerification
     {
         var vm = page.ViewModel;
         vm.LoadCatalogVerificationFixture(MouseCatalog.ById("G502Hero")!); tabs.SelectedIndex = 0;
-        var validBackup = JsonSerializer.Deserialize<Core.Onboard.MemorySnapshot>(vm.CaptureDiagnosticContext().GetProperty("Snapshot").GetRawText())!;
+        var validBackup = vm.CaptureDiagnosticContext().GetProperty("Snapshot").Deserialize(Profiles.ProfileJsonContext.Default.MemorySnapshot)!;
         vm.LoadDiagnosticFailureFixture();
         check("diagnostics-retry-enabled-for-onboard-draft", vm.CanRetryOnboardSave, "A failed onboard save can be retried without changing configuration or losing the draft.");
         check("diagnostics-error-has-sector-crc-context", vm.HasError && vm.Status.Contains("扇区 6") && vm.Status.Contains("CRC 不一致"), vm.Status);

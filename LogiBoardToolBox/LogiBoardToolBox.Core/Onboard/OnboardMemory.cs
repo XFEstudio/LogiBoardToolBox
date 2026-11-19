@@ -1,6 +1,7 @@
 using System.Text.Json;
 using LogiBoardToolBox.Core.HidPlusPlus;
 using LogiBoardToolBox.Core.Diagnostics;
+using LogiBoardToolBox.Core.Serialization;
 
 namespace LogiBoardToolBox.Core.Onboard;
 
@@ -10,7 +11,6 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
 {
     private const ushort Feature = 0x8100;
     private readonly SemaphoreSlim operationGate = new(1, 1);
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     public async Task<(byte Mode, ushort ActiveSector)> ActivateProfileAsync(ushort sector, CancellationToken ct = default)
     {
@@ -73,6 +73,12 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
         {
             progress?.Report($"读取存储扇区 0x{sector:X4}");
             try { snapshot.Sectors[sector] = await ReadSectorWithRecoveryAsync(sector, caps, ct).ConfigureAwait(false); }
+            catch (SectorAddressRejectedException ex)
+            {
+                snapshot.RejectedSectorAddresses.Add(sector);
+                snapshot.ReadErrors[sector] = ex.Message;
+                DiagnosticLog.Record("memory-read", "sector address rejected", new { deviceIdentity, sector, Offset = 0 }, ex);
+            }
             catch (HidPlusPlusException ex)
             {
                 snapshot.ReadErrors[sector] = ex.Message;
@@ -88,8 +94,8 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
         for (var attempt = 1; ; attempt++)
         {
             byte[] data;
-            try { data = await ReadSectorAsync(sector, caps.SectorSize, ct).ConfigureAwait(false); }
-            catch (Exception error) when (attempt < 3 && (error is TimeoutException || error is IOException and not HidPlusPlusException))
+            try { data = await ReadSectorAsync(sector, caps.SectorSize, ct, caps.HasG305StorageGeometry && sector is >= 3 and <= 5).ConfigureAwait(false); }
+            catch (IOException error) when (attempt < 3 && error is not HidPlusPlusException and not SectorAddressRejectedException)
             {
                 DiagnosticLog.Record("memory-read", "retry communication", new { deviceIdentity, sector, attempt }, error);
                 await Task.Delay(30, ct).ConfigureAwait(false); continue;
@@ -105,17 +111,45 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
         }
     }
 
-    private async Task<byte[]> ReadSectorAsync(int sector, int size, CancellationToken ct)
+    private sealed class SectorAddressRejectedException(HidPlusPlusException error) : IOException(error.Message, error);
+
+    private async Task<byte[]> ReadSectorAsync(int sector, int size, CancellationToken ct, bool detectRejectedAddress = false)
     {
         var bytes = new byte[size];
         for (var position = 0; position < size; position += 16)
         {
             var offset = Math.Min(position, size - 16);
-            var reply = await client.FeatureAsync(Feature, 5, [(byte)(sector >> 8), (byte)sector, (byte)(offset >> 8), (byte)offset], ct).ConfigureAwait(false);
-            if (reply.Length < 16) throw new IOException("板载读取没有返回 16 字节的长回复。");
+            byte[] reply;
+            try { reply = await ReadSectorChunkAsync(sector, offset, ct).ConfigureAwait(false); }
+            catch (HidPlusPlusException error) when (detectRejectedAddress && offset == 0 && error.Code == 2)
+            { throw new SectorAddressRejectedException(error); }
             reply.AsSpan(0, 16).CopyTo(bytes.AsSpan(offset));
         }
         return bytes;
+    }
+
+    private async Task<byte[]> ReadSectorChunkAsync(int sector, int offset, CancellationToken ct)
+    {
+        byte[] address = [(byte)(sector >> 8), (byte)sector, (byte)(offset >> 8), (byte)offset];
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var reply = await client.FeatureAsync(Feature, 5, address, ct).ConfigureAwait(false);
+                if (reply.Length < 16) throw new IOException("板载读取没有返回 16 字节的长回复。");
+                return reply;
+            }
+            catch (TimeoutException error) when (attempt < 3)
+            {
+                // The client still requires a reply matching the retried request's software ID.
+                DiagnosticLog.Record("memory-read", "retry timed-out chunk", new { deviceIdentity, sector, offset, attempt }, error);
+                await Task.Delay(30, ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException error)
+            {
+                throw new TimeoutException("鼠标未响应板载读取。唤醒或重新连接鼠标后可重试。", error);
+            }
+        }
     }
 
     private async Task WriteSectorAsync(int sector, byte[] data, CancellationToken ct)
@@ -143,7 +177,7 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
         var temporary = Path.Combine(parent, $".{Guid.NewGuid():N}.tmp");
         try
         {
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(snapshot, JsonOptions), ct).ConfigureAwait(false);
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(snapshot, BoardJsonContext.Default.MemorySnapshot), ct).ConfigureAwait(false);
             File.Move(temporary, path, overwrite: true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
@@ -152,10 +186,10 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
     public static async Task<MemorySnapshot> LoadBackupAsync(string path, CancellationToken ct = default)
     {
         if (new FileInfo(path).Length > 8 * 1024 * 1024) throw new InvalidDataException("备份文件超过大小限制。");
-        var backup = JsonSerializer.Deserialize<MemorySnapshot>(await File.ReadAllTextAsync(path, ct).ConfigureAwait(false))
+        var backup = JsonSerializer.Deserialize(await File.ReadAllTextAsync(path, ct).ConfigureAwait(false), BoardJsonContext.Default.MemorySnapshot)
             ?? throw new InvalidDataException("备份为空。");
         if (!MemorySnapshot.IsKnownFormat(backup.Format) || backup.Description is null || backup.Description.Length < 11 ||
-            backup.Sectors is null || backup.ReadErrors is null)
+            backup.Sectors is null || backup.ReadErrors is null || backup.RejectedSectorAddresses is null)
             throw new InvalidDataException("备份文件格式无效。");
         return backup;
     }
@@ -170,8 +204,9 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
             if (plan.Baseline.DeviceIdentity != deviceIdentity) throw new InvalidOperationException("设备已更换，请重新读取。");
             var baseline = plan.Baseline;
             var caps = baseline.Capabilities;
-            if (!caps.CanEditProfiles || plan.Changes.Select(c => c.Sector).Distinct().Count() != plan.Changes.Count ||
-                plan.Changes.Any(c => c.Sector < 0 || c.Sector >= caps.SectorCount || c.After.Length != caps.SectorSize ||
+            var writableSectorCount = baseline.WritableSectorCount;
+            if (!caps.CanEditProfiles || baseline.HasWritableReadErrors || plan.Changes.Select(c => c.Sector).Distinct().Count() != plan.Changes.Count ||
+                plan.Changes.Any(c => c.Sector < 0 || c.Sector >= writableSectorCount || c.After.Length != caps.SectorSize ||
                     c.Before.Length != caps.SectorSize || !caps.IsValidSectorWrite(c.Sector, c.After, plan.RestoresErasedSectors) ||
                     !baseline.Sectors.TryGetValue(c.Sector, out var b) || !b.SequenceEqual(c.Before)))
                 throw new InvalidDataException("写入计划无效。");
@@ -186,11 +221,17 @@ public sealed class OnboardMemory(HidPlusPlusClient client, string deviceIdentit
                 !caps.HasSameMacroExecution(OnboardCapabilities.Parse(currentDescription)))
                 throw new InvalidOperationException("设备固件或板载布局发生变化，请重新读取。");
             progress?.Report("检查设备是否被其他程序修改…");
-            for (var sector = 0; sector < caps.SectorCount; sector++)
+            for (var sector = 0; sector < writableSectorCount; sector++)
             {
                 if (!baseline.Sectors.TryGetValue(sector, out var expected) ||
                     !(await ReadSectorAsync(sector, caps.SectorSize, ct).ConfigureAwait(false)).SequenceEqual(expected))
                     throw new InvalidOperationException("读取后鼠标配置已发生变化，请重新读取后再写入。");
+            }
+            for (var sector = writableSectorCount; sector < caps.SectorCount; sector++)
+            {
+                try { await ReadSectorChunkAsync(sector, 0, ct).ConfigureAwait(false); }
+                catch (HidPlusPlusException ex) when (ex.Code == 2) { continue; }
+                throw new InvalidOperationException("板载存储范围已变化，请重新读取设备后再保存。");
             }
             var backupPath = Path.Combine(backupDirectory, $"onboard-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.json");
             await SaveBackupAsync(baseline, backupPath, ct).ConfigureAwait(false);

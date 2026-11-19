@@ -9,28 +9,44 @@ internal sealed class DiagnosticReplayTransport : IHidTransport
 {
     private readonly Channel<byte[]> replies = Channel.CreateUnbounded<byte[]>();
     private readonly byte[] description;
+    private readonly byte onboardFeature;
+    private readonly byte dpiFeature;
+    private const byte RgbFeatureIndex = 0x0A;
+    private readonly IReadOnlyDictionary<ushort, byte[]>? rgbInfo;
     private int writingSector, writingSize;
     private readonly List<byte> buffer = [];
     internal Dictionary<int, byte[]> Sectors { get; }
     internal int WriteStarts { get; private set; }
+    internal int Requests { get; private set; }
+    internal Func<int, int, bool>? RepeatPreviousReadReply { get; set; }
+    private byte[]? previousReadReply;
     private byte mode;
     private ushort active;
     public int InputReportLength => 20;
     public int OutputReportLength => 20;
-    internal DiagnosticReplayTransport(MemorySnapshot snapshot)
+    internal DiagnosticReplayTransport(MemorySnapshot snapshot, byte onboardFeature = 2, byte dpiFeature = 0,
+        IReadOnlyDictionary<ushort, byte[]>? rgbInfo = null)
     {
         if (!UiVerification.IsCatalogRequested) throw new InvalidOperationException("仅用于后台离线验收。");
+        this.onboardFeature = onboardFeature;
+        this.dpiFeature = dpiFeature;
+        this.rgbInfo = rgbInfo;
         description = (byte[])snapshot.Description.Clone(); mode = snapshot.Mode; active = snapshot.ActiveSector;
         Sectors = snapshot.Sectors.ToDictionary(p => p.Key, p => (byte[])p.Value.Clone());
     }
     public Task WriteAsync(byte[] request, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        Requests++;
         var reply = new byte[20]; request.AsSpan(0, 4).CopyTo(reply);
         var function = request[3] >> 4;
         if (request[2] == 0)
-        { if (function == 0) reply[4] = request[4] == 0x81 && request[5] == 0 ? (byte)2 : (byte)0; }
-        else if (request[2] == 2)
+        {
+            if (function == 0)
+                reply[4] = (request[4], request[5]) switch
+                { (0x81, 0) => onboardFeature, (0x22, 2) => dpiFeature, (0x80, 0x71) when rgbInfo is not null => RgbFeatureIndex, _ => 0 };
+        }
+        else if (request[2] == onboardFeature)
         {
             var sector = (request[4] << 8) | request[5]; var offset = (request[6] << 8) | request[7];
             switch (function)
@@ -41,16 +57,29 @@ internal sealed class DiagnosticReplayTransport : IHidTransport
                 case 3: active = (ushort)sector; break;
                 case 4: reply[4] = (byte)(active >> 8); reply[5] = (byte)active; break;
                 case 5:
+                    if (previousReadReply is { } previous && RepeatPreviousReadReply?.Invoke(sector, offset) == true)
+                    {
+                        replies.Writer.TryWrite(previous);
+                        return Task.CompletedTask;
+                    }
                     if (Sectors.TryGetValue(sector, out var data) && offset + 16 <= data.Length) data.AsSpan(offset, 16).CopyTo(reply.AsSpan(4));
                     else { reply[2] = 0xFF; reply[3] = request[2]; reply[4] = request[3]; reply[5] = 2; }
+                    previousReadReply = reply;
                     break;
                 case 6: WriteStarts++; writingSector = sector; writingSize = (request[8] << 8) | request[9]; buffer.Clear(); break;
                 case 7: buffer.AddRange(request.AsSpan(4, 16).ToArray()); break;
                 case 8: Sectors[writingSector] = buffer.Take(writingSize).ToArray(); break;
             }
         }
+        else if (request[2] == RgbFeatureIndex && rgbInfo is not null)
+        {
+            var selector = (ushort)((request[4] << 8) | request[5]);
+            if (function == 0 && rgbInfo.TryGetValue(selector, out var info)) info.CopyTo(reply, 4);
+            else { reply[2] = 0xFF; reply[3] = request[2]; reply[4] = request[3]; reply[5] = 2; }
+        }
         replies.Writer.TryWrite(reply); return Task.CompletedTask;
     }
     public async Task<byte[]> ReadAsync(CancellationToken ct) => await replies.Reader.ReadAsync(ct);
+    internal void PostReport(byte[] report) => replies.Writer.TryWrite(report);
     public void Dispose() => replies.Writer.TryComplete();
 }

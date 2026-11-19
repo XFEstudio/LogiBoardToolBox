@@ -34,7 +34,7 @@ public partial class MainPageViewModel
         if (!File.Exists(path)) return;
         try
         {
-            var entries = JsonSerializer.Deserialize<Dictionary<string, LightingSettings>>(File.ReadAllText(path)) ?? [];
+            var entries = JsonSerializer.Deserialize(File.ReadAllText(path), LogiBoardToolBox.Profiles.ProfileJsonContext.Default.Animations) ?? [];
             foreach (var (id, settings) in entries) { settings.Validate(); savedAnimations[id] = settings; AnimationPresets.Add(new(id, settings.Name)); }
         }
         catch (Exception error) { Log("动画库读取失败：" + error.Message); }
@@ -87,7 +87,7 @@ public partial class MainPageViewModel
         savedAnimations[id] = settings;
         Directory.CreateDirectory(dataDirectory);
         var path = Path.Combine(dataDirectory, "animations.json");
-        await File.WriteAllTextAsync(path + ".tmp", JsonSerializer.Serialize(savedAnimations, new JsonSerializerOptions { WriteIndented = true }));
+        await File.WriteAllTextAsync(path + ".tmp", JsonSerializer.Serialize(savedAnimations, LogiBoardToolBox.Profiles.ProfileJsonContext.Default.Animations));
         File.Move(path + ".tmp", path, true);
         var previous = AnimationPresets.FirstOrDefault(c => c.Id == id); if (previous is not null) AnimationPresets.Remove(previous);
         var choice = new EditorChoice(id, settings.Name); AnimationPresets.Add(choice); SelectedAnimationPreset = choice;
@@ -98,7 +98,7 @@ public partial class MainPageViewModel
     {
         if (!savedAnimations.Remove(SelectedAnimationPreset.Id)) return;
         AnimationPresets.Remove(SelectedAnimationPreset); SelectedAnimationPreset = AnimationPresets[0]; LoadSelectedAnimation();
-        Directory.CreateDirectory(dataDirectory); File.WriteAllText(Path.Combine(dataDirectory, "animations.json"), JsonSerializer.Serialize(savedAnimations));
+        Directory.CreateDirectory(dataDirectory); File.WriteAllText(Path.Combine(dataDirectory, "animations.json"), JsonSerializer.Serialize(savedAnimations, LogiBoardToolBox.Profiles.ProfileJsonContext.Default.Animations));
     }
     public void SelectAnimationFrame(LightingFrameEditor frame)
     {

@@ -24,7 +24,7 @@ public partial class MainPageViewModel
         {
             if (!File.Exists(path)) return;
             if (new FileInfo(path).Length > 2 * 1024 * 1024) throw new InvalidDataException("板载宏关联文件过大。");
-            var saved = JsonSerializer.Deserialize<OnboardMacroLinkFile>(await File.ReadAllTextAsync(path));
+            var saved = JsonSerializer.Deserialize(await File.ReadAllTextAsync(path), SettingsJsonContext.Default.OnboardMacroLinkFile);
             if (saved?.DeviceIdentity != snapshot.DeviceIdentity || saved.Bindings is null)
                 throw new InvalidDataException("板载宏关联不属于当前设备。");
             onboardMacroLinks = saved.Bindings.Where(b => b.Name is not null && b.Bytes is not null).ToArray();
@@ -49,7 +49,7 @@ public partial class MainPageViewModel
         try
         {
             Directory.CreateDirectory(dataDirectory);
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new OnboardMacroLinkFile(snapshot.DeviceIdentity, onboardMacroLinks), new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new OnboardMacroLinkFile(snapshot.DeviceIdentity, onboardMacroLinks), SettingsJsonContext.Default.OnboardMacroLinkFile));
             File.Move(temporary, path, true);
             DiagnosticLog.Record("macro-links", "saved", new { SelectedProfile.Sector, Count = links.Count });
         }
@@ -87,11 +87,19 @@ public partial class MainPageViewModel
                 var bytes = MacroAllocator.ReadMacroBytes(snapshot, new(ButtonBinding.MacroSector(row.Original), ButtonBinding.MacroOffset(row.Original)));
                 var hex = Convert.ToHexString(bytes);
                 var saved = onboardMacroLinks.Where(l => l.Profile == SelectedProfile.Sector && l.Button == row.Index && l.GShift == row.GShift && l.Bytes == hex).ToArray();
+                var nativeToggle = ButtonBinding.IsNativeToggle(row.Original);
                 var matches = saved.Length == 1 && Macros.Count(m => m.Name == saved[0].Name) == 1
                     ? known.Where(m => m.Name == saved[0].Name).ToArray() : known.Where(m => m.Bytes.SequenceEqual(bytes)).ToArray();
+                if (matches.Length > 1)
+                    matches = matches.Where(m => m.LegacyToggle == nativeToggle).ToArray();
                 if (matches.Length != 1 || Macros.Count(m => m.Name == matches[0].Name) != 1) continue;
                 var match = matches[0];
-                if (match.LegacyToggle && !forSoftware && (!snapshot.Capabilities.SupportsNativeToggle || !ButtonBinding.IsNativeToggle(row.Original)))
+                if (!forSoftware && nativeToggle && !match.LegacyToggle)
+                {
+                    row.FriendlyName = match.Name + "（板载版本）";
+                    continue;
+                }
+                if (match.LegacyToggle && !forSoftware && (!snapshot.Capabilities.SupportsNativeToggle || !nativeToggle))
                 {
                     row.FriendlyName = match.Name + (match.Bytes.SequenceEqual(bytes) ? "（旧板载循环）" : "（板载版本）");
                     DiagnosticLog.Record("macro-links", "legacy continuous loop is not a same-button toggle", new { row.Index, row.GShift, match.Name });

@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Media;
 namespace LogiBoardToolBox.Controls;
 
 /// <summary>The source/DPI/movement/result flow uses physical Raw Input and a sensor completion event.</summary>
-public sealed class HeroCalibrationView : UserControl
+public sealed partial class HeroCalibrationView : UserControl
 {
     private MainPageViewModel Vm => App.MouseWorkspace;
     private readonly StackPanel body = new() { Spacing = 24, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };

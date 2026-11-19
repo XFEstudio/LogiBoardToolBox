@@ -1,0 +1,542 @@
+[
+  {
+    "Id": "MX518",
+    "GHubModelId": "mx518",
+    "SlotPrefix": "",
+    "DisplayName": "MX518",
+    "Aliases": [
+      "MX518",
+      "MX518 Gaming Mouse"
+    ],
+    "ProductIds": [
+      49294
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/MX518.png",
+    "ImageAspect": 0.5431578947368421,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "ProWired",
+    "GHubModelId": "pro_mouse",
+    "SlotPrefix": "",
+    "DisplayName": "PRO",
+    "Aliases": [
+      "PRO",
+      "PRO Gaming Mouse"
+    ],
+    "ProductIds": [
+      49285
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/ProWired.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 1
+  },
+  {
+    "Id": "ProHero",
+    "GHubModelId": "pro_mouse_hero",
+    "SlotPrefix": "",
+    "DisplayName": "PRO HERO",
+    "Aliases": [
+      "PRO HERO",
+      "PRO HERO Gaming Mouse"
+    ],
+    "ProductIds": [
+      49292
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/ProHero.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 1
+  },
+  {
+    "Id": "G203Lightsync",
+    "GHubModelId": "g203_lightsync",
+    "SlotPrefix": "",
+    "DisplayName": "G203 LIGHTSYNC",
+    "Aliases": [
+      "G203 LIGHTSYNC",
+      "G203 LIGHTSYNC Gaming Mouse",
+      "G102 LIGHTSYNC"
+    ],
+    "ProductIds": [
+      49298,
+      49309
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G203Lightsync.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 1
+  },
+  {
+    "Id": "G203",
+    "GHubModelId": "g203",
+    "SlotPrefix": "",
+    "DisplayName": "G102",
+    "Aliases": [
+      "G102",
+      "G102 Prodigy Gaming Mouse",
+      "G102",
+      "G103",
+      "G203 Prodigy"
+    ],
+    "ProductIds": [
+      49284
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G203.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 1
+  },
+  {
+    "Id": "G302",
+    "GHubModelId": "g302",
+    "SlotPrefix": "",
+    "DisplayName": "G302",
+    "Aliases": [
+      "G302",
+      "G302 Daedalus Prime"
+    ],
+    "ProductIds": [
+      49279
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G302.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G303",
+    "GHubModelId": "g303",
+    "SlotPrefix": "",
+    "DisplayName": "G303",
+    "Aliases": [
+      "G303",
+      "G303 Daedalus Apex"
+    ],
+    "ProductIds": [
+      49280
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G303.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G502Core",
+    "GHubModelId": "g502_core",
+    "SlotPrefix": "g502core",
+    "DisplayName": "G502 Proteus Core",
+    "Aliases": [
+      "G502 Proteus Core",
+      "G502"
+    ],
+    "ProductIds": [
+      49277
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G502Core.png",
+    "ImageAspect": 0.516,
+    "Layout": "G502Classic",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后侧键 · G4",
+      "前侧键 · G5",
+      "DPI Shift 键 · G6",
+      "DPI − 键 · G7",
+      "DPI + 键 · G8",
+      "滚轮后方键 · G9",
+      "滚轮右倾",
+      "滚轮左倾"
+    ],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G502Spectrum",
+    "GHubModelId": "g502_spectrum",
+    "SlotPrefix": "g502spectrum",
+    "DisplayName": "G502 Proteus Spectrum",
+    "Aliases": [
+      "G502 Proteus Spectrum",
+      "G502"
+    ],
+    "ProductIds": [
+      49970
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G502Spectrum.png",
+    "ImageAspect": 0.516,
+    "Layout": "G502Classic",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后侧键 · G4",
+      "前侧键 · G5",
+      "DPI Shift 键 · G6",
+      "DPI − 键 · G7",
+      "DPI + 键 · G8",
+      "滚轮后方键 · G9",
+      "滚轮右倾",
+      "滚轮左倾"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G600",
+    "GHubModelId": "g600",
+    "SlotPrefix": "",
+    "DisplayName": "G600",
+    "Aliases": [
+      "G600",
+      "G600 MMO Gaming Mouse"
+    ],
+    "ProductIds": [
+      49738
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G600.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 1
+  },
+  {
+    "Id": "G602",
+    "GHubModelId": "g602",
+    "SlotPrefix": "",
+    "DisplayName": "G602",
+    "Aliases": [
+      "G602",
+      "G602 Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      50487
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G602.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G603",
+    "GHubModelId": "g603",
+    "SlotPrefix": "",
+    "DisplayName": "G603",
+    "Aliases": [
+      "G603",
+      "G603 Lightspeed Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      16492
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G603.png",
+    "ImageAspect": 0.516,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G604",
+    "GHubModelId": "g604",
+    "SlotPrefix": "",
+    "DisplayName": "G604 LIGHTSPEED",
+    "Aliases": [
+      "G604 LIGHTSPEED",
+      "G604 Lightspeed Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      16517,
+      45092
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G604.png",
+    "ImageAspect": 0.618,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G502XLightspeed",
+    "GHubModelId": "g502x_lightspeed",
+    "SlotPrefix": "g502x-lightspeed",
+    "DisplayName": "G502 X LIGHTSPEED",
+    "Aliases": [
+      "G502 X LIGHTSPEED",
+      "G502 X LIGHTSPEED Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      49304,
+      16543
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G502XLightspeed.png",
+    "ImageAspect": 0.594,
+    "Layout": "G502X",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "DPI Shift · G5",
+      "前进 · G6",
+      "滚轮左倾 · G7",
+      "滚轮右倾 · G8",
+      "配置切换 · G9",
+      "DPI 增加 · G10",
+      "DPI 减少 · G11",
+      "滚轮向下",
+      "滚轮向上"
+    ],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G502X",
+    "GHubModelId": "g502x",
+    "SlotPrefix": "g502x",
+    "DisplayName": "G502 X",
+    "Aliases": [
+      "G502 X",
+      "G502 X Gaming Mouse"
+    ],
+    "ProductIds": [
+      49305
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G502X.png",
+    "ImageAspect": 0.594,
+    "Layout": "G502X",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "DPI Shift · G5",
+      "前进 · G6",
+      "滚轮左倾 · G7",
+      "滚轮右倾 · G8",
+      "配置切换 · G9",
+      "DPI 增加 · G10",
+      "DPI 减少 · G11",
+      "滚轮向下",
+      "滚轮向上"
+    ],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G303Shroud",
+    "GHubModelId": "g303_wireless",
+    "SlotPrefix": "",
+    "DisplayName": "G303 SHROUD EDITION",
+    "Aliases": [
+      "G303 SHROUD EDITION",
+      "G303 Shroud Edition Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      16542,
+      49303
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G303Shroud.png",
+    "ImageAspect": 0.602,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G705",
+    "GHubModelId": "g705",
+    "SlotPrefix": "",
+    "DisplayName": "G705",
+    "Aliases": [
+      "G705",
+      "G705 Garnet"
+    ],
+    "ProductIds": [
+      49302,
+      45102,
+      16541
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G705.png",
+    "ImageAspect": 0.5161290322580645,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G502XMillennium",
+    "GHubModelId": "g502x_wl",
+    "SlotPrefix": "g502x-wl",
+    "DisplayName": "G502 X PLUS MILLENNIUM FALCON™",
+    "Aliases": [
+      "G502 X PLUS MILLENNIUM FALCON™",
+      "G502 X PLUS MILLENNIUM FALCON™ Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      49310,
+      16562
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G502XMillennium.png",
+    "ImageAspect": 0.594,
+    "Layout": "G502X",
+    "ButtonNames": [
+      "左键 · G1",
+      "右键 · G2",
+      "滚轮中键 · G3",
+      "后退 · G4",
+      "DPI Shift · G5",
+      "前进 · G6",
+      "滚轮左倾 · G7",
+      "滚轮右倾 · G8",
+      "配置切换 · G9",
+      "DPI 增加 · G10",
+      "DPI 减少 · G11",
+      "滚轮向下",
+      "滚轮向上"
+    ],
+    "LightingZoneCount": 2
+  },
+  {
+    "Id": "G309",
+    "GHubModelId": "g309",
+    "SlotPrefix": "",
+    "DisplayName": "G309 LIGHTSPEED",
+    "Aliases": [
+      "G309 LIGHTSPEED",
+      "G309 LIGHTSPEED Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      16561,
+      45116
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G309.png",
+    "ImageAspect": 0.53,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "Superlight2c",
+    "GHubModelId": "pro_x_2_compact_wireless_mouse",
+    "SlotPrefix": "",
+    "DisplayName": "PRO X SUPERLIGHT 2c",
+    "Aliases": [
+      "PRO X SUPERLIGHT 2c",
+      "PRO X SUPERLIGHT 2c Wireless Mouse",
+      "GPW4小狗",
+      "GPW4 小狗"
+    ],
+    "ProductIds": [
+      16567,
+      49311
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/Superlight2c.png",
+    "ImageAspect": 0.5192857142857142,
+    "Layout": "Compact",
+    "ButtonNames": ["左键 · G1", "右键 · G2", "滚轮中键 · G3", "左侧后退 · G4", "左侧前进 · G5"],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G304X",
+    "GHubModelId": "g304x",
+    "SlotPrefix": "",
+    "DisplayName": "G304 X LIGHTSPEED",
+    "Aliases": [
+      "G304 X LIGHTSPEED",
+      "G304 X LIGHTSPEED Wireless Gaming Mouse"
+    ],
+    "ProductIds": [
+      16572,
+      49319
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G304X.png",
+    "ImageAspect": 0.574,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "G305XSuperlight",
+    "GHubModelId": "g305_x",
+    "SlotPrefix": "",
+    "DisplayName": "G305 X SUPERLIGHT",
+    "Aliases": [
+      "G305 X SUPERLIGHT",
+      "G305 X SUPERLIGHT Wireless Mouse"
+    ],
+    "ProductIds": [
+      16571,
+      49316,
+      45126
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/G305XSuperlight.png",
+    "ImageAspect": 0.5485714285714286,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 1
+  },
+  {
+    "Id": "Superstrike2",
+    "GHubModelId": "pro_x_2_superstrike_wireless_mouse",
+    "SlotPrefix": "",
+    "DisplayName": "PRO X2 SUPERSTRIKE",
+    "Aliases": [
+      "PRO X2 SUPERSTRIKE",
+      "PRO X2 SUPERSTRIKE Wireless Mouse",
+      "GPW5雪豹",
+      "GPW5 雪豹"
+    ],
+    "ProductIds": [
+      16573,
+      49320
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/Superstrike2.png",
+    "ImageAspect": 0.5035714285714286,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "Superstrike3",
+    "GHubModelId": "pro_x_3_superstrike_wireless_mouse",
+    "SlotPrefix": "",
+    "DisplayName": "PRO X3 SUPERSTRIKE",
+    "Aliases": [
+      "PRO X3 SUPERSTRIKE",
+      "PRO X3 SUPERSTRIKE Wireless Mouse",
+      "GPW5 Ultra"
+    ],
+    "ProductIds": [
+      16574,
+      49321
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/Superstrike3.png",
+    "ImageAspect": 0.5039285714285714,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  },
+  {
+    "Id": "Superstrike1",
+    "GHubModelId": "pro_x_1_superstrike_wireless_mouse",
+    "SlotPrefix": "",
+    "DisplayName": "PRO X1 SUPERSTRIKE",
+    "Aliases": [
+      "PRO X1 SUPERSTRIKE",
+      "PRO X1 SUPERSTRIKE Wireless Mouse"
+    ],
+    "ProductIds": [
+      16589,
+      49335
+    ],
+    "ImageAsset": "/Assets/Devices/Catalog/Superstrike1.png",
+    "ImageAspect": 0.5035714285714286,
+    "Layout": "Generic",
+    "ButtonNames": [],
+    "LightingZoneCount": 0
+  }
+]

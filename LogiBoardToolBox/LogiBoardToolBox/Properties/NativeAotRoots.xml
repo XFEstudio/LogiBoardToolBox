@@ -1,0 +1,10 @@
+<linker>
+  <assembly fullname="XFEExtension.NetCore.WinUIHelper">
+    <!-- ServiceManager locates these internal implementation classes by name. -->
+    <type fullname="XFEExtension.NetCore.WinUIHelper.Implements.Services.DialogService" preserve="all" />
+    <type fullname="XFEExtension.NetCore.WinUIHelper.Implements.Services.NavigationViewService" preserve="all" />
+    <type fullname="XFEExtension.NetCore.WinUIHelper.Implements.Services.MessageService" preserve="all" />
+    <type fullname="XFEExtension.NetCore.WinUIHelper.Implements.Services.LoadingService" preserve="all" />
+    <type fullname="XFEExtension.NetCore.WinUIHelper.Implements.Services.SettingService" preserve="all" />
+  </assembly>
+</linker>

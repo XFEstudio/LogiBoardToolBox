@@ -1,6 +1,6 @@
 <UserControl x:Class="LogiBoardToolBox.Controls.LightsyncMapView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
  <Viewbox Stretch="Uniform"><Grid Width="1500" Height="1000" Background="Black">
-  <Viewbox x:Name="OriginalModel" Width="285" Height="480" Stretch="Fill" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,280,0,0"><Grid Width="1391" Height="2700"><Canvas x:Name="LightSurface" Width="1391" Height="2700"/><Image Source="/Assets/Devices/G502XPlus/front_black.png" Stretch="Fill"/></Grid></Viewbox>
+  <Viewbox x:Name="OriginalModel" Width="285" Height="480" Stretch="Fill" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,280,0,0"><Grid Width="1391" Height="2700"><Canvas x:Name="LightSurface" Width="1391" Height="2700"/><Image x:Name="OriginalModelImage" Stretch="Fill"/></Grid></Viewbox>
   <Image x:Name="CatalogImage" Height="480" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,280,0,0" Visibility="Collapsed"/>
   <Canvas x:Name="Selectors" Width="1500" Height="1000"/>
  </Grid></Viewbox>

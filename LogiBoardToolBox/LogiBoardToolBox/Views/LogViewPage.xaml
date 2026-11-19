@@ -95,16 +95,16 @@
             <RowDefinition/>
         </Grid.RowDefinitions>
         <StackPanel Orientation="Horizontal" Spacing="10">
-            <AutoSuggestBox HorizontalAlignment="Left" Width="250" QueryIcon="Find" PlaceholderText="搜索时间/日志级别/消息等" Text="{x:Bind ViewModel.SearchText, Mode=TwoWay}"/>
+            <AutoSuggestBox HorizontalAlignment="Left" Width="250" PlaceholderText="搜索时间/日志级别/消息等" Text="{x:Bind ViewModel.SearchText, Mode=TwoWay}"><AutoSuggestBox.QueryIcon><PathIcon Style="{StaticResource AppVectorIcon}" Data="F0 M 8,1 A 7,7 0 1 1 7.99,15 A 7,7 0 0 1 8,1 Z M 8,2.5 A 5.5,5.5 0 1 0 8.01,13.5 A 5.5,5.5 0 0 0 8,2.5 Z M 13.2,12.2 L 19.1,18.1 L 18,19.2 L 12.1,13.3 Z"/></AutoSuggestBox.QueryIcon></AutoSuggestBox>
             <Button Command="{x:Bind ViewModel.RefreshCommand}">
                 <StackPanel Orientation="Horizontal" Spacing="10">
-                    <FontIcon Glyph="&#xE72C;"/>
+                    <PathIcon Style="{StaticResource AppVectorIcon}" Data="M 2,2 H 3.5 V 6.2 A 8.3,8.3 0 1 1 1.8,13.9 L 3.2,13.4 A 6.8,6.8 0 1 0 4.8,7.3 H 8 V 8.8 H 2 Z"/>
                     <TextBlock Text="刷新列表"/>
                 </StackPanel>
             </Button>
         </StackPanel>
         <CommandBar Grid.Row="1" DefaultLabelPosition="Right" HorizontalAlignment="Left">
-            <AppBarButton Label="选择日期" Icon="Calendar">
+            <AppBarButton Label="选择日期"><AppBarButton.Icon><PathIcon Style="{StaticResource AppVectorIcon}" Data="F0 M 1,3 H 19 V 19 H 1 Z M 2.5,8 V 17.5 H 17.5 V 8 Z M 2.5,4.5 V 6.5 H 17.5 V 4.5 Z M 5,1 H 6.5 V 3 H 5 Z M 13.5,1 H 15 V 3 H 13.5 Z M 5,11 H 8 V 14 H 5 Z M 11,11 H 14 V 14 H 11 Z"/></AppBarButton.Icon>
                 <AppBarButton.Flyout>
                     <Flyout>
                         <Grid>
@@ -132,11 +132,11 @@
             </AppBarButton>
             <AppBarButton Label="导出诊断包" AutomationProperties.AutomationId="logs-export-diagnostics" Command="{x:Bind ViewModel.ExportLogCommand}">
                 <AppBarButton.Icon>
-                    <FontIcon Glyph="&#xEDE1;"/>
+                    <PathIcon Style="{StaticResource AppVectorIcon}" Data="M 2,2 H 10 V 3.5 H 3.5 V 17.5 H 16.5 V 12 H 18 V 19 H 2 Z M 12,1 H 19 V 8 H 17.5 V 3.6 L 10.5,10.6 L 9.4,9.5 L 16.4,2.5 H 12 Z"/>
                 </AppBarButton.Icon>
             </AppBarButton>
             <AppBarSeparator/>
-            <AppBarButton Label="清空日志" Icon="Delete">
+            <AppBarButton Label="清空日志"><AppBarButton.Icon><PathIcon Style="{StaticResource AppVectorIcon}" Data="F0 M 2,4 H 7 V 2 H 13 V 4 H 18 V 5.5 H 2 Z M 8.4,3 V 4 H 11.6 V 3 Z M 3.5,6.5 H 16.5 L 15.3,19 H 4.7 Z M 5.1,8 L 6.1,17.5 H 13.9 L 14.9,8 Z M 8,9 H 9.3 V 16 H 8 Z M 10.7,9 H 12 V 16 H 10.7 Z"/></AppBarButton.Icon>
                 <AppBarButton.Flyout>
                     <Flyout>
                         <StackPanel Orientation="Vertical" Spacing="10" MaxWidth="200">

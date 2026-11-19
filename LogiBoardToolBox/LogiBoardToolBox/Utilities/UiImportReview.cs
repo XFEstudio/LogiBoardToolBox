@@ -28,16 +28,16 @@ internal static partial class UiVerification
         }
         finally { vm.IsSideView = side; }
         GetWindowThreadProcessId(GetForegroundWindow(), out var foregroundAfter);
-        await File.WriteAllTextAsync(Path.Combine(folder, "workspace.json"), JsonSerializer.Serialize(new
+        await File.WriteAllTextAsync(Path.Combine(folder, "workspace.json"), Core.Diagnostics.DiagnosticJson.Serialize(new
         {
-            ProcessId = Environment.ProcessId, BuildSha256 = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(typeof(UiVerification).Assembly.Location))),
+            ProcessId = Environment.ProcessId, BuildSha256 = await GetBuildHashAsync(),
             vm.HasError, vm.Status, vm.ModeSummary, Configuration = vm.SelectedConfiguration?.Label,
             ForegroundBefore = foregroundBefore, ForegroundAfter = foregroundAfter, Images = images,
             Bindings = vm.AllBindings.Where(b => b.SelectedAction.Id == "macro").Select(b => new { b.Index, b.GShift, b.Label, b.Value, b.DisplayAction, Original = Convert.ToHexString(b.Original) }),
             Palette = vm.AssignmentItems.Select(i => new { i.Name, i.AssignedTo, i.Description }),
             Macros = vm.Macros.Select(m => new { m.Name, m.Script, Repeat = m.Repeat.ToString(), m.UseStandardDelay, m.StandardDelay, m.HoldScript, m.ReleaseScript }),
             HostMacroEngine = vm.HostMacrosRunning, SoftwareLighting = vm.LightsyncRunning
-        }, new JsonSerializerOptions { WriteIndented = true }));
+        }, indented: true));
 
         async Task Capture(string name)
         {

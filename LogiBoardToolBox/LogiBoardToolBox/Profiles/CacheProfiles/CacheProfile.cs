@@ -5,7 +5,11 @@ namespace LogiBoardToolBox.Profiles.CacheProfiles
 {
     public partial class CacheProfile : XFEProfile
     {
-        public CacheProfile() => ProfilePath = $@"{AppPathHelper.CacheProfile}\{nameof(CacheProfile)}";
+        public CacheProfile()
+        {
+            JsonOptions.TypeInfoResolver = ProfileJsonContext.Default;
+            ProfilePath = $@"{AppPathHelper.CacheProfile}\{nameof(CacheProfile)}";
+        }
 
         /// <summary>
         /// 你的缓存内容

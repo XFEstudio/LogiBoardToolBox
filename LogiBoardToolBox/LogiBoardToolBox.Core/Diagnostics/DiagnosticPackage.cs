@@ -1,7 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace LogiBoardToolBox.Core.Diagnostics;
 
@@ -67,7 +66,7 @@ public static class DiagnosticPackage
                 {
                     var entry = zip.CreateEntry(name);
                     await using var target = entry.Open();
-                    await JsonSerializer.SerializeAsync(target, value, new JsonSerializerOptions { WriteIndented = true }, ct);
+                    await DiagnosticJson.WriteAsync(target, value, ct);
                 }
             }
             ct.ThrowIfCancellationRequested();

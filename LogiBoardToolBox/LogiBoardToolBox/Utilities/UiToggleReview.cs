@@ -65,7 +65,8 @@ internal static partial class UiVerification
         finally { vm.DetachDiagnosticReplay(); }
         // Protocol-extension simulation only. This does not install or verify
         // modified firmware on a physical mouse.
-        var extended = JsonSerializer.Deserialize<MemorySnapshot>(JsonSerializer.Serialize(snapshot))!;
+        var typeInfo = Profiles.ProfileJsonContext.Default.MemorySnapshot;
+        var extended = JsonSerializer.Deserialize(JsonSerializer.Serialize(snapshot, typeInfo), typeInfo)!;
         extended.Description = extended.Description.Take(11).Concat(Convert.FromHexString("4C42540302")).ToArray();
         vm.LoadToggleDiagnosticSnapshot(extended); tabs.SelectedIndex = 1;
         var nativeReplay = vm.AttachDiagnosticReplay();
@@ -89,12 +90,12 @@ internal static partial class UiVerification
             var encoded = new MemorySnapshot { Description = extended.Description, Sectors = nativeReplay.Sectors.ToDictionary(p => p.Key, p => p.Value) };
             var bytes = MacroAllocator.ReadMacroBytes(encoded, new(ButtonBinding.MacroSector(binding), ButtonBinding.MacroOffset(binding)));
             check("native-toggle-recorded-delays", Convert.ToHexString(bytes) == "4100014000C84200014000C803FF", Convert.ToHexString(bytes));
-            await File.WriteAllTextAsync(Path.Combine(OutputDirectory, "native-encoded-board.json"), JsonSerializer.Serialize(new
+            await File.WriteAllTextAsync(Path.Combine(OutputDirectory, "native-encoded-board.json"), Core.Diagnostics.DiagnosticJson.Serialize(new
             {
                 HardwareAccess = false, SimulatedFirmwareCapability = true, NativePatchInstalled = false,
                 Description = Convert.ToHexString(extended.Description), Profile = vm.SelectedProfile!.Sector, Button = 7,
                 Sectors = nativeReplay.Sectors.ToDictionary(p => p.Key, p => Convert.ToHexString(p.Value))
-            }, new JsonSerializerOptions { WriteIndented = true }));
+            }, indented: true));
             tabs.SelectedIndex = 0; await capture("G502Hero-native-toggle-assignment");
         }
         finally { vm.DetachDiagnosticReplay(); }

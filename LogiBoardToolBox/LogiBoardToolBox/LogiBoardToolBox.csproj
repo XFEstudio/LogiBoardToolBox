@@ -12,7 +12,7 @@
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.String]::Copy('$(Platform)').ToLowerInvariant())</RuntimeIdentifier>
     <PublishProfile>win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
-    <Version>1.1.0</Version>
+    <Version>1.1.11</Version>
     <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -52,12 +52,20 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
-    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="NAudio.Wasapi" Version="3.1.0" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.12" />
     <PackageReference Include="XFEExtension.NetCore.AutoConfig" Version="4.1.2" />
     <PackageReference Include="XFEExtension.NetCore.AutoPath" Version="2.0.0" />
     <PackageReference Include="XFEExtension.NetCore.XFEConsole" Version="2.6.0" />
     <PackageReference Include="XFEExtension.NetCore.WinUIHelper" Version="2.0.1" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(PublishAot)' == 'true' Or '$(PublishProfile)' == 'win-x64-aot'">
+    <!-- Diagnostic payloads include anonymous records from both assemblies. -->
+    <TrimmerRootAssembly Include="LogiBoardToolBox" />
+    <TrimmerRootAssembly Include="LogiBoardToolBox.Core" />
+    <!-- MoonSharp discovers the built-in sandbox modules by reflection. -->
+    <TrimmerRootAssembly Include="MoonSharp.Interpreter" />
+    <TrimmerRootDescriptor Include="Properties\NativeAotRoots.xml" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LogiBoardToolBox.Core\LogiBoardToolBox.Core.csproj" />

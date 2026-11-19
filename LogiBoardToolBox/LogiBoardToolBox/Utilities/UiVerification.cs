@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Runtime.InteropServices.WindowsRuntime;
 using LogiBoardToolBox.ViewModels;
 using LogiBoardToolBox.Views;
@@ -21,8 +23,16 @@ internal static partial class UiVerification
     public static bool HardwareWritesEnabled { get; private set; }
     public static string OutputDirectory { get { var index = Array.IndexOf(args, IsCatalogRequested ? "--catalog-verify" : IsInputEditRequested ? "--input-verify" : "--ui-verify"); return Path.GetFullPath(index >= 0 && index + 1 < args.Length ? args[index + 1] : "ui-verification"); } }
     public static string SettingsDirectory => Path.Combine(OutputDirectory, "isolated-settings", Environment.ProcessId.ToString());
-    public const int ViewportWidth = 3840, ViewportHeight = 2088;
+    public static int ViewportWidth => args.Contains("--compact-viewport") ? 1280 : args.Contains("--workspace-review") ? 1600 : 3840;
+    public static int ViewportHeight => args.Contains("--compact-viewport") ? 720 : args.Contains("--workspace-review") ? 900 : 2088;
     private static bool running;
+    private static async Task<string> GetBuildHashAsync()
+    {
+        var assemblyPath = RuntimeFeature.IsDynamicCodeSupported ? typeof(UiVerification).Assembly.Location : "";
+        var path = assemblyPath.Length > 0 ? assemblyPath : Environment.ProcessPath ?? throw new IOException("找不到程序文件。");
+        await using var file = File.OpenRead(path);
+        return Convert.ToHexString(await SHA256.HashDataAsync(file));
+    }
     public static async Task RunAsync(MainPage page, Controls.WorkspaceHost tabs)
     {
         if (running) return; running = true;
@@ -30,7 +40,7 @@ internal static partial class UiVerification
         var folder = Path.GetFullPath(at + 1 < args.Length ? args[at + 1] : "ui-verification"); Directory.CreateDirectory(folder);
         var checks = new List<object>(); var vm = page.ViewModel;
         GetWindowThreadProcessId(GetForegroundWindow(), out var foregroundStart);
-        var buildHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(typeof(UiVerification).Assembly.Location)));
+        var buildHash = await GetBuildHashAsync();
         var originalMacro = vm.SelectedMacro;
         var selected = vm.SelectedProfile;
         try
@@ -86,15 +96,7 @@ internal static partial class UiVerification
             var sampled = await Task.Run(() => new Services.ScreenSampler(0).Sample(vm.BuildLightsyncSettings().Regions));
             Check("native-screen-source", sampled.Length == 8, string.Join(',', sampled.Select(c => c.ToString())));
             vm.SelectedLightsyncEffect = vm.LightsyncEffects.First(e => e.Id == "AudioVisualizer"); await Capture("10-audio-visualizer");
-            using (var meter = new Services.SystemAudioMeter())
-            {
-                // An all-zero stream exercises loopback while producing no audible test tone.
-                using var silentOutput = new NAudio.Wave.WasapiOut(NAudio.CoreAudioApi.AudioClientShareMode.Shared, false, 50);
-                silentOutput.Init(new NAudio.Wave.SilenceProvider(meter.Format)); silentOutput.Play();
-                await Task.Delay(150);
-                Check("native-audio-loopback", double.IsFinite(meter.Level), $"WASAPI default render endpoint opened; samples {meter.SamplesReceived}; RMS {meter.Level}");
-                Check("native-audio-callback", meter.SamplesReceived > 0, "Silent output loopback delivered " + meter.SamplesReceived + " real PCM samples; no audible tone or volume change.");
-            }
+            await VerifyAudioLoopbackAsync(Check);
             tabs.SelectedIndex = 4; await Capture("11-device-settings");
             await VerifyHeroAsync(page, Capture, Check);
             if (args.Contains("--write-verify")) await VerifyImmediateWritesAsync(page, tabs, Capture, Check);
@@ -106,11 +108,11 @@ internal static partial class UiVerification
             Check("no-software-input-engine", !vm.HostMacrosRunning && !vm.LightsyncRunning, args.Contains("--write-verify") ? "Opt-in board writes were separately backed up, read back, and restored; no software input engine ran." : "Only device reads and local draft edits were performed");
             vm.Macros.Remove(testMacro); vm.SelectedMacro = originalMacro;
             GetWindowThreadProcessId(GetForegroundWindow(), out var foregroundEnd);
-            await File.WriteAllTextAsync(Path.Combine(folder, "result.json"), JsonSerializer.Serialize(new { FunctionalChecksPassed = true, VisualAcceptance = "See the separate requirements/review/verdict files; screenshot capture is not visual approval.", Capture = "WinUI RenderTargetBitmap", BuildSha256 = buildHash, ProcessId = Environment.ProcessId, ForegroundAtStart = foregroundStart, ForegroundAtEnd = foregroundEnd, Theme = ((FrameworkElement)App.MainWindow.Content).ActualTheme.ToString(), Checks = checks }, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(Path.Combine(folder, "result.json"), Core.Diagnostics.DiagnosticJson.Serialize(new { FunctionalChecksPassed = true, VisualAcceptance = "See the separate requirements/review/verdict files; screenshot capture is not visual approval.", Capture = "WinUI RenderTargetBitmap", BuildSha256 = buildHash, ProcessId = Environment.ProcessId, ForegroundAtStart = foregroundStart, ForegroundAtEnd = foregroundEnd, Theme = ((FrameworkElement)App.MainWindow.Content).ActualTheme.ToString(), Checks = checks }, indented: true));
         }
         catch (Exception ex)
         {
-            await File.WriteAllTextAsync(Path.Combine(folder, "result.json"), JsonSerializer.Serialize(new { Passed = false, Error = ex.ToString(), Checks = checks }, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(Path.Combine(folder, "result.json"), Core.Diagnostics.DiagnosticJson.Serialize(new { Passed = false, Error = ex.ToString(), Checks = checks }, indented: true));
         }
         finally { await vm.ShutdownAsync(); App.MainWindow.Close(); }
 
@@ -189,7 +191,7 @@ internal static partial class UiVerification
             }
             Walk(root);
             GetWindowThreadProcessId(GetForegroundWindow(), out var foreground);
-            await File.WriteAllTextAsync(Path.Combine(folder, name + ".layout.json"), JsonSerializer.Serialize(new { Capture = name, BuildSha256 = buildHash, ForegroundProcess = foreground, Scale = page.XamlRoot.RasterizationScale, State = new { tabs.SelectedIndex, vm.ShowGShift, vm.IsSideView, Macro = vm.SelectedMacro?.Name, MacroRepeat = vm.SelectedMacro?.SelectedRepeat.Label, Lightsync = vm.SelectedLightsyncMode.Label, Effect = vm.SelectedLightsyncEffect.Label, vm.BatteryText, vm.FirmwareText }, Nodes = layout }, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(Path.Combine(folder, name + ".layout.json"), Core.Diagnostics.DiagnosticJson.Serialize(new { Capture = name, BuildSha256 = buildHash, ForegroundProcess = foreground, Scale = page.XamlRoot.RasterizationScale, State = new { tabs.SelectedIndex, vm.ShowGShift, vm.IsSideView, Macro = vm.SelectedMacro?.Name, MacroRepeat = vm.SelectedMacro?.SelectedRepeat.Label, Lightsync = vm.SelectedLightsyncMode.Label, Effect = vm.SelectedLightsyncEffect.Label, vm.BatteryText, vm.FirmwareText }, Nodes = layout }, indented: true));
             checks.Add(new { Name = name, Passed = true, Width = bitmap.PixelWidth, Height = bitmap.PixelHeight, Page = new { page.ActualWidth, page.ActualHeight } });
         }
     }

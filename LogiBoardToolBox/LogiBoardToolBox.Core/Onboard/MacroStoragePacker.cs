@@ -11,11 +11,12 @@ public static partial class MacroAllocator
         if (assignments.Count == 0) return new([], []);
         var caps = snapshot.Capabilities;
         if (!caps.CanWriteMacros) throw new NotSupportedException("设备没有可用的格式 1 板载宏空间。");
+        foreach (var assignment in assignments) MacroCompiler.ValidateFirmwareInstructions(assignment.Macro, caps);
         if (assignments.Any(a => a.Macro.Repeat == MacroRepeat.Toggle) && !caps.SupportsNativeToggle)
             throw new NotSupportedException(MacroCompiler.OnboardToggleUnavailable);
-        if (assignments.Any(a => a.Macro.Repeat == MacroRepeat.Toggle && (a.Macro.Instructions.Count < 3 ||
+        if (assignments.Any(a => a.Macro.Repeat is MacroRepeat.Toggle or MacroRepeat.Continuous && (a.Macro.Instructions.Count < 3 ||
             !a.Macro.Instructions[^2].SequenceEqual(new byte[] { 3 }) || !a.Macro.Instructions[^1].SequenceEqual(new byte[] { 0xFF }))))
-            throw new InvalidDataException("触发宏的原生循环结束指令无效。");
+            throw new InvalidDataException("宏的固件循环指令无效。");
         if (profileSector is not null && (profileSector == 0 || profileSector > caps.ProfileCount)) throw new ArgumentOutOfRangeException(nameof(profileSector));
         if (assignments.Any(a => a.ButtonIndex < 0 || a.ButtonIndex >= caps.AssignableButtonCount || a.GShift && !caps.HasGShift))
             throw new ArgumentException("宏绑定超出此鼠标实际提供的按键或 G-Shift 层。");
@@ -89,7 +90,7 @@ public static partial class MacroAllocator
         foreach (var assignment in assignments)
         {
             var instructions = assignment.Macro.Instructions; var all = assignment.Macro.Bytes; var length = all.Length;
-            if (length == 0 || instructions.Any(i => i.Length == 0 || i[0] == 0x60 || i.Length != MacroCompiler.InstructionSize(i[0])))
+            if (length == 0 || instructions.Any(i => i.Length == 0 || i[0] == 0x60 || i.Length != MacroCompiler.InstructionSize(i[0], caps)))
                 throw new InvalidDataException("待分配宏包含无效指令或未解析的存储跳转。");
             var key = Key(all, assignment.Macro.Repeat == MacroRepeat.Toggle, profileSector ?? 0, assignment.ButtonIndex, assignment.GShift);
             if (!dedup.TryGetValue(key, out var location))

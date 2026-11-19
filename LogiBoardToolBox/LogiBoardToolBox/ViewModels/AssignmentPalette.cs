@@ -4,7 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace LogiBoardToolBox.ViewModels;
 
-public sealed record AssignmentItem(string Name, string Category, string Action, string Value, string Description, string AssignedTo = "", string Color = "#00A5DB")
+public sealed record AssignmentItem(string Name, string Category, string Action, string Value, string Description, string AssignedTo = "", string Color = "#00A5DB", int MacroIndex = -1)
 {
     [System.Text.Json.Serialization.JsonIgnore] public string Chip => Category == "macros" ? "M" : Category == "keys" ? "K" : Category == "system" ? "▶" : "⌘";
     [System.Text.Json.Serialization.JsonIgnore] public Microsoft.UI.Xaml.Media.SolidColorBrush ChipBrush { get { try { var c = Category == "macros" ? Core.Lighting.Rgb.Parse(Color) : new Core.Lighting.Rgb(91, 94, 98); return new(Windows.UI.Color.FromArgb(255, c.R, c.G, c.B)); } catch (FormatException) { return new(Microsoft.UI.Colors.Cyan); } } }
@@ -58,8 +58,13 @@ public partial class MainPageViewModel
             yield return new(key, "keys", "key", key, "键盘按键");
         (string Name, string Action, string Value)[] mouse = [("左键点击", "mouse", "1"), ("右键点击", "mouse", "2"), ("中键点击", "mouse", "3"), ("后退", "mouse", "4"), ("前进", "mouse", "5"), ("向左滚动", "special", "tilt-left"), ("向右滚动", "special", "tilt-right"), ("向上滚动", "special", "scroll-up"), ("向下滚动", "special", "scroll-down"), ("DPI 增加", "special", "dpi-up"), ("DPI 减少", "special", "dpi-down"), ("DPI 循环", "special", "dpi-cycle"), ("默认 DPI", "special", "dpi-default"), ("DPI Shift", "special", "dpi-shift"), ("G-Shift", "special", "gshift"), ("板载配置文件循环", "special", "profile-cycle"), ("下一个配置", "special", "profile-next"), ("上一个配置", "special", "profile-prev"), ("电量显示", "special", "battery"), ("停止所有宏", "special", "macro-stop-all")];
         foreach (var item in mouse) yield return new(item.Name, "actions", item.Action, item.Value, "鼠标与板载功能");
-        foreach (var macro in Macros) yield return new(macro.Name, "macros", "macro", macro.Name, macro.SelectedRepeat.Label,
-            string.Join(", ", VisibleBindings.Where(r => r.SelectedAction.Id == "macro" && r.Value == macro.Name).Select(r => r.Label.Split('·').Last().Trim())), macro.Color);
+        for (var i = 0; i < Macros.Count; i++)
+        {
+            var macro = Macros[i];
+            yield return new(macro.Name, "macros", "macro", macro.Name, macro.SelectedRepeat.Label,
+                string.Join(", ", VisibleBindings.Where(r => r.SelectedAction.Id == "macro" && r.Value == macro.Name)
+                    .Select(r => r.Label.Split('·').Last().Trim())), macro.Color, i);
+        }
         (string Name, string Code)[] system = [("播放 / 暂停", "0xCD"), ("停止播放", "0xB7"), ("下一曲", "0xB5"), ("上一曲", "0xB6"), ("音量增加", "0xE9"), ("音量减少", "0xEA"), ("静音", "0xE2")];
         foreach (var item in system) yield return new(item.Name, "system", "consumer", item.Code, "媒体控制");
     }
@@ -71,8 +76,11 @@ public partial class MainPageViewModel
             var target = SelectedButton ?? throw new InvalidOperationException("请先在鼠标视图中选择目标按键。");
             if (item is null) return;
             EnsureProfileRouteEditable(target);
-            if (IsEditingOnboard && item.Action == "macro")
-                _ = Macros.Single(m => m.Name == item.Value).Compile(snapshot?.Capabilities);
+            if (item.Action == "macro")
+            {
+                var macro = GetUniqueMacroForBinding(item.Value);
+                if (IsEditingOnboard) _ = macro.Compile(snapshot?.Capabilities);
+            }
             target.SelectedAction = ButtonBindingEditor.ActionChoices.Single(c => c.Id == item.Action);
             target.Value = item.Value; target.FriendlyName = item.Name;
             OnPropertyChanged(nameof(SelectedButtonAction));
@@ -82,6 +90,14 @@ public partial class MainPageViewModel
             RefreshAssignmentPalette();
         }
         catch (Exception ex) { ShowError(ex); }
+    }
+
+    internal MacroEditor GetUniqueMacroForBinding(string name)
+    {
+        var matches = Macros.Where(m => m.Name == name).Take(2).ToArray();
+        if (matches.Length != 1)
+            throw new InvalidOperationException("宏名称不存在或重名。请在宏列表中打开对应宏并确认名称。");
+        return matches[0];
     }
     [RelayCommand]
     private void ResetSelectedButton()

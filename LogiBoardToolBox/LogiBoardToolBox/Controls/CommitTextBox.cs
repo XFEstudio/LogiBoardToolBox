@@ -13,7 +13,7 @@ public sealed class TextCommitEventArgs(string text, TextCommitReason reason) : 
 }
 
 /// <summary>Text is a local draft; only Value participates in the settings binding.</summary>
-public sealed class CommitTextBox : TextBox
+public sealed partial class CommitTextBox : TextBox
 {
     public static readonly DependencyProperty ValueProperty = DependencyProperty.Register(nameof(Value), typeof(string), typeof(CommitTextBox), new PropertyMetadata("", ValueChanged));
     public static readonly DependencyProperty ErrorTextProperty = DependencyProperty.Register(nameof(ErrorText), typeof(string), typeof(CommitTextBox), new PropertyMetadata(""));

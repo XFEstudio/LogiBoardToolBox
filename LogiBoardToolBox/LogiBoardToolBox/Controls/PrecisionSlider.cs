@@ -1,12 +1,10 @@
 using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Markup;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 
 namespace LogiBoardToolBox.Controls;
 
 /// <summary>Thin G HUB track with a white thumb, while retaining RangeBase keyboard/accessibility semantics.</summary>
-public sealed class PrecisionSlider : RangeBase
+public sealed partial class PrecisionSlider : RangeBase
 {
     public static readonly DependencyProperty StepFrequencyProperty = DependencyProperty.Register(nameof(StepFrequency), typeof(double), typeof(PrecisionSlider), new PropertyMetadata(1d));
     public double StepFrequency { get => (double)GetValue(StepFrequencyProperty); set => SetValue(StepFrequencyProperty, value); }
@@ -18,11 +16,7 @@ public sealed class PrecisionSlider : RangeBase
     public PrecisionSlider()
     {
         IsTabStop = true; MinHeight = 28;
-        Template = (ControlTemplate)XamlReader.Load("""
-            <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="Control">
-             <Grid x:Name="TrackArea" Height="28" Background="Transparent"><Rectangle Fill="#35383B" Height="3" Margin="6,0" RadiusX="1.5" RadiusY="1.5"/><Rectangle x:Name="ValueFill" Fill="#009EFF" Height="3" HorizontalAlignment="Left" Margin="6,0,0,0" RadiusX="1.5" RadiusY="1.5"/><Ellipse x:Name="Thumb" Fill="White" Width="12" Height="12" HorizontalAlignment="Left"/></Grid>
-            </ControlTemplate>
-            """);
+        DefaultStyleKey = typeof(PrecisionSlider);
         foreach (var property in new[] { MinimumProperty, MaximumProperty, ValueProperty, IsEnabledProperty }) RegisterPropertyChangedCallback(property, (_, _) => Refresh());
         KeyDown += (_, e) =>
         {

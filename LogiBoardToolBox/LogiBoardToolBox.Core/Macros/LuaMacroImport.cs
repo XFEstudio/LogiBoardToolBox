@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using MoonSharp.Interpreter;
+using LogiBoardToolBox.Core.Onboard;
 
 namespace LogiBoardToolBox.Core.Macros;
 
@@ -9,6 +10,19 @@ namespace LogiBoardToolBox.Core.Macros;
 public static class LuaMacroImport
 {
     private const int MaximumTableEntries = 65536;
+    public static CompiledMacro ConvertForFirmware(string source, int triggerButton, int physicalButtonIndex,
+        OnboardCapabilities capabilities, CancellationToken cancellationToken = default)
+    {
+        if (!capabilities.SupportsNativeLua) throw Unsupported("设备未声明运行时随机等待和实体键条件扩展");
+        if (triggerButton is < 1 or > 5) throw new ArgumentOutOfRangeException(nameof(triggerButton));
+        if (physicalButtonIndex < 0 || physicalButtonIndex >= capabilities.ButtonCount) throw new ArgumentOutOfRangeException(nameof(physicalButtonIndex));
+        cancellationToken.ThrowIfCancellationRequested(); LuaSourceFile.ValidateSource(source);
+        var statements = new Parser(source, cancellationToken).Parse();
+        try { _ = new Script(CoreModules.Preset_HardSandbox).LoadString(source, codeFriendlyName: "onboard-import.lua"); }
+        catch (SyntaxErrorException error) { throw new FormatException("Lua 语法无效：" + error.DecoratedMessage, error); }
+        var conversion = new Compiler(statements, triggerButton, MacroRepeat.Once, cancellationToken, (ushort)(1 << physicalButtonIndex)).Run();
+        return MacroCompiler.CompileNativeLua(conversion.Script, capabilities);
+    }
     public static MacroProgram ConvertToMacro(string source, int triggerButton = 1, MacroRepeat repeat = MacroRepeat.Once) => Convert(source, triggerButton, repeat).CompileProgram();
     public static string ConvertToScript(string source, int triggerButton = 1, MacroRepeat repeat = MacroRepeat.Once) => Convert(source, triggerButton, repeat).Script;
     public static LuaOnboardConversion Convert(string source, int triggerButton = 1, MacroRepeat repeat = MacroRepeat.Once, CancellationToken cancellationToken = default)
@@ -49,6 +63,7 @@ public static class LuaMacroImport
     private sealed record Break : Stmt;
     private sealed class ReturnFlow(object?[] values) : Exception { public object?[] Values { get; } = values; }
     private sealed class BreakFlow : Exception;
+    private sealed class ContinuousLoopFlow : Exception;
     private sealed class Cell(object? value) { public object? Value = value; public bool Persistent; }
     private sealed class Scope
     {
@@ -88,7 +103,8 @@ public static class LuaMacroImport
             return count;
         }
     }
-    private sealed class Compiler(List<Stmt> statements, int trigger, MacroRepeat requested, CancellationToken cancellationToken)
+    private sealed record RuntimeDelay(int Minimum, int Maximum);
+    private sealed class Compiler(List<Stmt> statements, int trigger, MacroRepeat requested, CancellationToken cancellationToken, ushort physicalMask = 0)
     {
         private readonly Scope globals = new(new Scope());
         private readonly List<string> press = [], hold = [], release = [];
@@ -97,9 +113,10 @@ public static class LuaMacroImport
         private readonly HashSet<Cell> protectedCells = [];
         private readonly HashSet<TableValue> protectedTables = [];
         private readonly HashSet<string> topLocals = new(StringComparer.Ordinal);
-        private bool initializing = true, inPhysicalLoop, hasPhysicalLoop, releaseEvent;
+        private readonly HashSet<Stmt> nativeTailStatements = [];
+        private bool initializing = true, inRepeatLoop, hasPhysicalLoop, releaseEvent;
         private bool primaryEnabled = true;
-        private int steps, depth;
+        private int steps, depth, sleepArgumentDepth;
         public LuaOnboardConversion Run()
         {
             InstallNatives();
@@ -107,21 +124,52 @@ public static class LuaMacroImport
             if (globals.Find("OnEvent")?.Value is not FunctionValue handler || handler.Definition.Parameters.Count < 2) throw new FormatException("Lua 需要定义 function OnEvent(event, arg)。");
             foreach (var cell in globals.VisibleCells().Values) { cell.Persistent = true; MarkPersistent(cell.Value, []); }
             initializing = false; AuditFunction(handler, [], 0);
+            if (physicalMask != 0) CollectNativeTails(handler.Definition.Body, true);
             if (trigger == 1 && !primaryEnabled) throw Unsupported("脚本已关闭左键事件，不能生成会执行的左键宏");
-            output = press; CallUser(handler, ["MOUSE_BUTTON_PRESSED", (double)trigger, "mouse"]);
+            var continuous = false;
+            output = press;
+            try { CallUser(handler, ["MOUSE_BUTTON_PRESSED", (double)trigger, "mouse"]); }
+            catch (ContinuousLoopFlow) { continuous = true; }
             releaseEvent = true; output = release; CallUser(handler, ["MOUSE_BUTTON_RELEASED", (double)trigger, "mouse"]);
+            if (physicalMask != 0)
+            {
+                if (press.Count == 0) throw new FormatException("选定触发键没有按下事件动作。");
+                if (release.Count != 0) throw Unsupported("此运行时固件转换尚不能合并独立松开事件");
+                return new("native-begin\n" + string.Join('\n', press), MacroRepeat.Once, trigger,
+                    "使用已声明的 MCU 扩展；随机等待逐轮执行，条件在等待完成后读取实体键状态。");
+            }
             if (press.Count + hold.Count + release.Count == 0) throw new FormatException("选定触发键的 Lua 按下/松开事件没有可转换的动作。");
-            if (release.Count > 0 && requested is MacroRepeat.Toggle or MacroRepeat.WhileHeld) throw Unsupported("脚本包含松开动作，不能用开关宏/按住重复覆盖松开阶段；请选择单次或完整序列");
+            if (release.Count > 0 && (continuous || requested is MacroRepeat.Toggle or MacroRepeat.WhileHeld or MacroRepeat.Continuous))
+                throw Unsupported("当前板载格式无法在循环宏中保留独立的松开动作");
             var sequence = release.Count > 0 || hasPhysicalLoop && (press.Count > 0 || requested == MacroRepeat.Sequence);
-            var repeat = sequence || requested == MacroRepeat.Sequence ? MacroRepeat.Sequence : hasPhysicalLoop && requested == MacroRepeat.Once ? MacroRepeat.WhileHeld : requested;
+            var repeat = sequence || requested == MacroRepeat.Sequence ? MacroRepeat.Sequence : requested;
+            if (repeat == MacroRepeat.Once)
+            {
+                if (continuous) repeat = MacroRepeat.Continuous;
+                else if (hasPhysicalLoop) repeat = MacroRepeat.WhileHeld;
+            }
             if (hasPhysicalLoop && !sequence && repeat != MacroRepeat.Sequence) press.AddRange(hold);
+            var loopNotice = repeat == MacroRepeat.Continuous
+                ? "板载只存一轮动作，按下后持续执行。可为另一个实体键分配「停止所有宏」。"
+                : hasPhysicalLoop ? "检测到选定按键的按住循环。" : "";
             var result = new LuaOnboardConversion(string.Join('\n', press), repeat, trigger,
-                "仅提取选定鼠标键的按下/松开事件；其他事件动作不写入板载。确定性计算已展开，未采样主机状态或随机数，不是安装 Lua 解释器。" + (hasPhysicalLoop ? "检测到选定按键的按住循环。" : ""))
+                "已提取选定鼠标键的事件动作，保留确定性计算结果。" + loopNotice)
             { HoldScript = repeat == MacroRepeat.Sequence ? string.Join('\n', hold) : "", ReleaseScript = string.Join('\n', release) };
             _ = result.CompileProgram(); return result;
         }
         private static void MarkPersistent(object? value, HashSet<TableValue> visited)
         { if (value is TableValue table && visited.Add(table)) { table.Persistent = true; foreach (var child in table.Values.Values) MarkPersistent(child, visited); } }
+        private void CollectNativeTails(List<Stmt> body, bool tail)
+        {
+            for (var i = 0; i < body.Count; i++)
+            {
+                var isTail = tail && i == body.Count - 1;
+                if (isTail) nativeTailStatements.Add(body[i]);
+                if (body[i] is If condition)
+                { foreach (var arm in condition.Arms) CollectNativeTails(arm.Body, isTail); CollectNativeTails(condition.Else, isTail); }
+                else if (body[i] is Block block) CollectNativeTails(block.Body, isTail);
+            }
+        }
         private void Step()
         {
             if ((++steps & 63) == 0) cancellationToken.ThrowIfCancellationRequested();
@@ -149,6 +197,12 @@ public static class LuaMacroImport
                             break;
                         case Invoke invoke: _ = CallAll(invoke.Call, scope); break;
                         case If condition:
+                            if (physicalMask != 0 && condition.Arms.Count == 1 && SelectedHold(condition.Arms[0].Condition, scope, false))
+                            {
+                                if (!nativeTailStatements.Contains(condition) || condition.Else.Count != 0 || held.Count != 0 || releaseEvent || initializing || inRepeatLoop)
+                                    throw Unsupported("当前实体键条件仅能位于 OnEvent 的末尾分支；不能跳过分支后的动作");
+                                Add("exit-unless-held " + physicalMask); Execute(condition.Arms[0].Body, new Scope(scope)); break;
+                            }
                             var arm = condition.Arms.FirstOrDefault(a => Truth(Eval(a.Condition, scope))); Execute(arm.Body ?? condition.Else, new Scope(scope)); break;
                         case Block block: Execute(block.Body, new Scope(scope)); break;
                         case For loop:
@@ -172,6 +226,8 @@ public static class LuaMacroImport
                             break;
                         case While loop:
                             if (SelectedHold(loop.Condition, scope, loop.Until)) { PhysicalLoop(loop, scope); break; }
+                            if (Unwrap(loop.Condition) is Literal literal && Truth(literal.Value) != loop.Until && !CanLeaveLoop(loop.Body))
+                                ContinuousLoop(loop, scope);
                             if (loop.Until)
                             {
                                 while (true) { Step(); var iteration = new Scope(scope); try { Execute(loop.Body, iteration); } catch (BreakFlow) { break; } if (Truth(Eval(loop.Condition, iteration))) break; }
@@ -195,32 +251,121 @@ public static class LuaMacroImport
                 if (local) { CheckTopLocal(variable.Item1, scope); scope.Declare(variable.Item1, value); return; }
                 var cell = variable.Item2;
                 if (cell is null) { if (!initializing) throw Unsupported("会修改跨事件全局变量 " + variable.Item1); globals.Environment.Declare(variable.Item1, value); return; }
-                if (!initializing && (cell.Persistent || protectedCells.Contains(cell))) throw Unsupported("会修改跨事件变量或按住循环外状态 " + variable.Item1);
+                if (!initializing && (cell.Persistent || protectedCells.Contains(cell))) throw Unsupported("会修改跨事件变量或循环外状态 " + variable.Item1);
                 cell.Value = value;
             }
             else if (target is ValueTuple<TableValue, object?> indexed) { CheckMutable(indexed.Item1); indexed.Item1.Set(indexed.Item2, value); }
             else throw Unsupported("未知赋值目标");
         }
-        private void CheckMutable(TableValue table) { if (!initializing && (table.Persistent || protectedTables.Contains(table))) throw Unsupported("配置表或其别名存在跨事件/按住轮次状态，需软件层执行"); }
+        private void CheckMutable(TableValue table) { if (!initializing && (table.Persistent || protectedTables.Contains(table))) throw Unsupported("配置表或其别名存在跨事件/跨轮次状态，需软件层执行"); }
+        private static Expr Unwrap(Expr expression)
+        {
+            while (expression is Grouped group) expression = group.Value;
+            return expression;
+        }
+
+        private bool CanLeaveLoop(List<Stmt> body, bool nested = false)
+        {
+            foreach (var statement in body)
+            {
+                Step();
+                var exits = statement switch
+                {
+                    Break => !nested,
+                    Return => true,
+                    Block block => CanLeaveLoop(block.Body, nested),
+                    If branch => branch.Arms.Any(arm => CanLeaveLoop(arm.Body, nested)) || CanLeaveLoop(branch.Else, nested),
+                    For loop => CanLeaveLoop(loop.Body, nested: true),
+                    Each loop => CanLeaveLoop(loop.Body, nested: true),
+                    While loop => CanLeaveLoop(loop.Body, nested: true),
+                    _ => false
+                };
+                if (exits) return true;
+            }
+            return false;
+        }
+
         private bool SelectedHold(Expr expression, Scope scope, bool until)
         {
-            if (until) { if (expression is not Unary { Op: "not" } negative) return false; expression = negative.Value; }
-            return expression is Call { Target: Name { Value: "IsMouseButtonPressed" }, Arguments.Count: 1 } call && Integer(Eval(call.Arguments[0], scope), 1, 5) == trigger;
+            expression = Unwrap(expression);
+            if (until) { if (expression is not Unary { Op: "not" } negative) return false; expression = Unwrap(negative.Value); }
+            return scope.Find("IsMouseButtonPressed")?.Value is Native { Name: "IsMouseButtonPressed" } &&
+                expression is Call { Target: Name { Value: "IsMouseButtonPressed" }, Arguments.Count: 1 } call && Integer(Eval(call.Arguments[0], scope), 1, 5) == trigger;
         }
         private void PhysicalLoop(While loop, Scope scope)
         {
-            if (releaseEvent || initializing || inPhysicalLoop || hasPhysicalLoop) throw Unsupported("不能合并多个、嵌套或松开阶段的物理按住循环");
-            hasPhysicalLoop = true; inPhysicalLoop = true; output = hold;
-            foreach (var cell in scope.Capture().Cells.Values) { protectedCells.Add(cell); CollectTables(cell.Value, protectedTables); }
+            if (releaseEvent || initializing || inRepeatLoop || hasPhysicalLoop) throw Unsupported("不能合并多个、嵌套或松开阶段的物理按住循环");
+            hasPhysicalLoop = true;
+            if (physicalMask == 0) output = hold;
+            else
+            {
+                if (held.Count != 0) throw Unsupported("按住循环入口必须释放所有输入");
+                if (!loop.Until)
+                {
+                    if (!nativeTailStatements.Contains(loop)) throw Unsupported("while 按住循环后仍有动作，需要条件跳过指令");
+                    Add("exit-unless-held " + physicalMask);
+                }
+                Add("loop-begin");
+            }
+            CompileRepeatBody(loop.Body, scope);
+            if (physicalMask == 0) output = release;
+            if (physicalMask != 0)
+            {
+                if (held.Count != 0) throw Unsupported("每轮按住循环必须释放全部输入");
+                Add("loop-held " + physicalMask);
+            }
+        }
+        private void ContinuousLoop(While loop, Scope scope)
+        {
+            if (initializing || releaseEvent || inRepeatLoop || hasPhysicalLoop || physicalMask != 0)
+                throw Unsupported("持续循环需位于选定按键的按下事件中，且不能嵌套固件循环");
+            if (press.Count != 0) throw Unsupported("循环前有只执行一次的动作，当前板载格式只能从宏开头重复");
+            if (requested == MacroRepeat.Sequence) throw Unsupported("此持续循环没有松开阶段，请使用持续循环播放方式");
+            CompileRepeatBody(loop.Body, scope);
+            if (press.Count == 0) throw Unsupported("持续循环没有可写入的动作");
+            if (held.Count != 0) throw Unsupported("持续循环需在每轮结束前释放该轮按下的所有输入");
+            throw new ContinuousLoopFlow();
+        }
+
+        private void CompileRepeatBody(List<Stmt> body, Scope scope)
+        {
+            inRepeatLoop = true;
             try
             {
-                try { Execute(loop.Body, new Scope(scope)); }
-                catch (BreakFlow) { throw Unsupported("物理按住循环中的 break 不能表示为简单固件重复"); }
-                catch (ReturnFlow) { throw Unsupported("物理按住循环中的提前 return 不能表示为简单固件重复"); }
+                ProtectRepeatState(scope);
+                Execute(body, new Scope(scope));
             }
-            finally { inPhysicalLoop = false; protectedCells.Clear(); protectedTables.Clear(); output = release; }
+            catch (BreakFlow) { throw Unsupported("循环中的 break 无法表示为固件重复指令"); }
+            catch (ReturnFlow) { throw Unsupported("循环中的提前 return 无法表示为固件重复指令"); }
+            finally
+            {
+                inRepeatLoop = false;
+                protectedCells.Clear();
+                protectedTables.Clear();
+            }
         }
-        private static void CollectTables(object? value, HashSet<TableValue> tables) { if (value is TableValue table && tables.Add(table)) foreach (var child in table.Values.Values) CollectTables(child, tables); }
+
+        private void ProtectRepeatState(Scope scope)
+        {
+            var pending = new Stack<object?>(scope.Capture().Cells.Values);
+            while (pending.TryPop(out var value))
+            {
+                Step();
+                switch (value)
+                {
+                    case Cell cell when protectedCells.Add(cell):
+                        pending.Push(cell.Value);
+                        break;
+                    case TableValue table when protectedTables.Add(table):
+                        foreach (var item in table.Values.Values) pending.Push(item);
+                        break;
+                    case FunctionValue function:
+                        foreach (var captured in function.Closure.Cells.Values) pending.Push(captured);
+                        break;
+                }
+            }
+        }
+
         private object? Eval(Expr expression, Scope scope)
         {
             Step();
@@ -274,7 +419,9 @@ public static class LuaMacroImport
         }
         private object?[] CallAll(Call call, Scope scope)
         {
-            var function = Eval(call.Target, scope); var args = EvalList(call.Arguments, scope);
+            var function = Eval(call.Target, scope); object?[] args;
+            var sleep = function is Native { Name: "Sleep" }; if (sleep) sleepArgumentDepth++;
+            try { args = EvalList(call.Arguments, scope); } finally { if (sleep) sleepArgumentDepth--; }
             return function switch { FunctionValue user => CallUser(user, args), Native native => CallNative(native.Name, args), _ => throw Unsupported("未知函数或主机接口 " + Describe(call.Target)) };
         }
         private object?[] CallUser(FunctionValue function, object?[] args)
@@ -292,7 +439,11 @@ public static class LuaMacroImport
                     if (args.Length != 1 || args[0] is not bool enabled) throw Unsupported("EnablePrimaryMouseButtonEvents 需要布尔参数");
                     if (initializing) primaryEnabled = enabled; else if (trigger == 1 && !enabled) throw Unsupported("选定左键事件被脚本关闭"); return [];
                 case "OutputLogMessage" or "ClearLog": return [];
-                case "Sleep": InputsOnly(name); var duration = Integer(A(0), 0, 600000); while (duration > 0) { var chunk = Math.Min(duration, 65535); Add("delay " + chunk); duration -= chunk; } return [];
+                case "Sleep":
+                    InputsOnly(name);
+                    if (A(0) is RuntimeDelay random)
+                    { if (args.Length != 1) throw Unsupported("运行时随机等待需要一个 Sleep 参数"); Add($"random-delay {random.Minimum} {random.Maximum}"); return []; }
+                    var duration = Integer(A(0), 0, 600000); while (duration > 0) { var chunk = Math.Min(duration, 65535); Add("delay " + chunk); duration -= chunk; } return [];
                 case "MoveMouseRelative": InputsOnly(name); Add($"move {Integer(A(0), short.MinValue, short.MaxValue)} {Integer(A(1), short.MinValue, short.MaxValue)}"); return [];
                 case "MoveMouseWheel": InputsOnly(name); Add("wheel " + Integer(A(0), -127, 127)); return [];
                 case "PressMouseButton" or "ReleaseMouseButton" or "PressAndReleaseMouseButton":
@@ -321,6 +472,12 @@ public static class LuaMacroImport
                 case "math.sin": return [Math.Sin(N(0))]; case "math.cos": return [Math.Cos(N(0))]; case "math.tan": return [Finite(Math.Tan(N(0)))];
                 case "math.asin": return [Finite(Math.Asin(N(0)))]; case "math.acos": return [Finite(Math.Acos(N(0)))]; case "math.atan": return [Math.Atan(N(0))]; case "math.atan2": return [Math.Atan2(N(0), N(1))];
                 case "math.exp": return [Finite(Math.Exp(N(0)))]; case "math.log": return [Finite(args.Length > 1 ? Math.Log(N(0), N(1)) : Math.Log(N(0)))]; case "math.log10": return [Finite(Math.Log10(N(0)))];
+                case "math.random" when physicalMask != 0:
+                    InputsOnly(name);
+                    if (sleepArgumentDepth == 0 || args.Length is < 1 or > 2) throw Unsupported("目前仅将 Sleep(math.random(min,max)) 编译为运行时随机等待；不固定随机变量");
+                    var lower = args.Length == 1 ? 1 : Integer(A(0), 0, 65535);
+                    var upper = Integer(A(args.Length - 1), lower, 65535);
+                    return [new RuntimeDelay(lower, upper)];
                 case "math.random" or "math.randomseed": throw Unsupported("随机数不能在转换时抽样固定；固件没有等价随机执行指令");
                 case "table.insert":
                     var insert = Table(A(0)); CheckMutable(insert); var length = insert.ArrayLength(true); var position = args.Length == 2 ? length + 1 : Integer(A(1), 1, length + 1); var inserted = args.Length == 2 ? A(1) : A(2);
@@ -349,7 +506,7 @@ public static class LuaMacroImport
             var key = code is >= 224 and <= 231 ? HidKeys.Describe((byte)(1 << (code - 224)), 0) : HidKeys.Describe(0, (byte)code);
             Add(kind == "mouse" ? $"mouse {code} {(down ? "down" : "up")}" : $"key {key} {(down ? "down" : "up")}");
         }
-        private void Add(string line) { if (press.Count + hold.Count + release.Count >= 10000) throw Unsupported("宏指令超过 10,000 条"); output.Add(line); }
+        private void Add(string line) => output.Add(line);
         private void InstallNatives()
         {
             foreach (var name in new[] { "EnablePrimaryMouseButtonEvents", "OutputLogMessage", "ClearLog", "Sleep", "MoveMouseRelative", "MoveMouseWheel", "PressMouseButton", "ReleaseMouseButton", "PressAndReleaseMouseButton", "PressKey", "ReleaseKey", "PressAndReleaseKey", "ipairs", "pairs", "type", "tostring", "tonumber", "assert", "error", "unpack", "IsMouseButtonPressed", "IsKeyLockOn", "IsModifierPressed", "GetRunningTime" }) globals.Environment.Declare(name, new Native(name));

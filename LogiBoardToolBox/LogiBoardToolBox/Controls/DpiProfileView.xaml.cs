@@ -11,7 +11,7 @@ public sealed partial class DpiProfileView : UserControl
     public event EventHandler? HeroRequested;
     public DpiProfileView() { InitializeComponent(); DataContext = ViewModel; CustomPresets.ItemsSource = ViewModel.SensitivityPresets; Unloaded += (_, _) => pending?.Cancel(); }
     private void SearchPresets_Click(object sender, RoutedEventArgs e) { PresetSearch.Visibility = PresetSearch.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible; if (PresetSearch.Visibility == Visibility.Visible) PresetSearch.Focus(FocusState.Programmatic); }
-    private void PresetSearch_Changed(object sender, TextChangedEventArgs e) => PresetList.ItemsSource = ViewModel.DpiPresets.Where(p => p.Label.Contains(PresetSearch.Text, StringComparison.OrdinalIgnoreCase)).ToArray();
+    private void PresetSearch_Changed(object sender, TextChangedEventArgs e) => PresetList.ItemsSource = ViewModel.DpiPresets.Where(p => p.Label.Contains(PresetSearch.Text, StringComparison.OrdinalIgnoreCase)).ToList();
     private async void Preset_Click(object sender, ItemClickEventArgs e) { ViewModel.SelectedDpiPreset = (EditorChoice)e.ClickedItem; ViewModel.ApplyDpiPresetCommand.Execute(null); ViewModel.SensitivityName = ViewModel.SelectedDpiPreset.Label; await ApplyLive(); }
     private async void CustomPreset_Click(object sender, ItemClickEventArgs e) { ViewModel.LoadSensitivityPreset((SensitivityPreset)e.ClickedItem); await ApplyLive(); }
     private void AddPreset_Click(object sender, RoutedEventArgs e) => ViewModel.SaveSensitivityPreset(true);

@@ -12,7 +12,7 @@ public partial class MainPageViewModel
     private SensorPerformance? sensor;
     public ObservableCollection<EditorChoice> WirelessReportRates { get; } = [];
     public ObservableCollection<EditorChoice> LiveReportRates { get; } = [];
-    public IReadOnlyList<EditorChoice> DpiPresets { get; } = [new("default", "默认设置"), new("fps", "第一人称视角"), new("fps-xy", "第一人称视角 XY 轴分离"), new("mmo", "MMORPG"), new("mmo-xy", "MMORPG XY 轴分离"), new("moba", "MOBA"), new("productivity", "生产力场景"), new("rts", "RTS"), new("simulation", "模拟类游戏"), new("third", "第三人称视角"), new("third-xy", "第三人称视角 XY 轴分离")];
+    public List<EditorChoice> DpiPresets { get; } = [new("default", "默认设置"), new("fps", "第一人称视角"), new("fps-xy", "第一人称视角 XY 轴分离"), new("mmo", "MMORPG"), new("mmo-xy", "MMORPG XY 轴分离"), new("moba", "MOBA"), new("productivity", "生产力场景"), new("rts", "RTS"), new("simulation", "模拟类游戏"), new("third", "第三人称视角"), new("third-xy", "第三人称视角 XY 轴分离")];
     [ObservableProperty] public partial string SensitivityName { get; set; } = "默认设置";
     [ObservableProperty] public partial bool AdvancedDpi { get; set; }
     partial void OnAdvancedDpiChanged(bool value) { foreach (var stage in DpiStages) stage.IsAdvanced = value; }
@@ -20,7 +20,6 @@ public partial class MainPageViewModel
     [ObservableProperty] public partial EditorChoice? SelectedWirelessRate { get; set; }
     [ObservableProperty] public partial EditorChoice? SelectedLiveRate { get; set; }
     [ObservableProperty] public partial DpiStageEditor? SelectedDpiStage { get; set; }
-    partial void OnSelectedDpiStageChanged(DpiStageEditor? oldValue, DpiStageEditor? newValue) { if (oldValue is not null) oldValue.IsSelected = false; if (newValue is not null) newValue.IsSelected = true; }
     [ObservableProperty] public partial string PerformanceSummary { get; set; } = "读取鼠标后显示传感器范围和当前 DPI。";
     [ObservableProperty] public partial string PerformanceNote { get; set; } = "选择一个 DPI 速度，设置默认速度与 DPI Shift。";
     [ObservableProperty] public partial string DpiInputError { get; set; } = "";
@@ -49,12 +48,7 @@ public partial class MainPageViewModel
         performance = new(client!, SelectedDevice?.DeviceIndex != 0xFF);
         try
         {
-            sensor = await performance.ReadAsync();
-            ReportRates.Clear(); foreach (var hz in sensor.WiredRates) ReportRates.Add(new(hz.ToString(), $"{hz} Hz"));
-            WirelessReportRates.Clear(); foreach (var hz in sensor.WirelessRates) WirelessReportRates.Add(new(hz.ToString(), $"{hz} Hz"));
-            LiveReportRates.Clear(); foreach (var hz in sensor.ActualRates) LiveReportRates.Add(new(hz.ToString(), $"{hz} Hz"));
-            SelectedLiveRate = LiveReportRates.FirstOrDefault(r => r.Id == (SelectedDevice?.DeviceIndex != 0xFF ? sensor.WirelessRate : sensor.WiredRate).ToString());
-            PerformanceSummary = $"当前 {sensor.CurrentX} × {sensor.CurrentY} DPI · {(SelectedLiveRate?.Label ?? "回报率未提供")} · 传感器 {sensor.Minimum}–{sensor.Maximum} DPI";
+            LoadSensorPerformance(await performance.ReadAsync());
             PerformanceNote = snapshot?.Capabilities.IsExperimental == true ? "支持五档 DPI、独立 X/Y、默认与 DPI Shift、有线与无线回报率。格式 10 的板载扩展仍需开启实验性写入；所有未知字段会保留。" : "设置五档 DPI、默认与 DPI Shift；停用速度不会删除其他设置。";
         }
         catch (Exception ex)
@@ -64,6 +58,16 @@ public partial class MainPageViewModel
             Log(PerformanceSummary);
         }
         foreach (var name in new[] { nameof(HasIndependentAxes), nameof(HasSeparateRates), nameof(DpiMinimum), nameof(DpiMaximum), nameof(CanApplyPerformance) }) OnPropertyChanged(name);
+    }
+
+    private void LoadSensorPerformance(SensorPerformance read)
+    {
+        sensor = read;
+        ReportRates.Clear(); foreach (var hz in read.WiredRates) ReportRates.Add(new(hz.ToString(), $"{hz} Hz"));
+        WirelessReportRates.Clear(); foreach (var hz in read.WirelessRates) WirelessReportRates.Add(new(hz.ToString(), $"{hz} Hz"));
+        LiveReportRates.Clear(); foreach (var hz in read.ActualRates) LiveReportRates.Add(new(hz.ToString(), $"{hz} Hz"));
+        SelectedLiveRate = LiveReportRates.FirstOrDefault(r => r.Id == (SelectedDevice?.DeviceIndex != 0xFF ? read.WirelessRate : read.WiredRate).ToString());
+        PerformanceSummary = $"当前 {read.CurrentX} × {read.CurrentY} DPI · {(SelectedLiveRate?.Label ?? "回报率未提供")} · 传感器 {read.Minimum}–{read.Maximum} DPI";
     }
     private void LoadPerformance(MouseProfile profile)
     {
@@ -77,17 +81,20 @@ public partial class MainPageViewModel
         }
         catch (Exception ex) { Log(ex.Message); }
         SelectedDpiStage = DpiStages.FirstOrDefault(s => s.Index == profile.DefaultDpiIndex) ?? DpiStages.FirstOrDefault();
+        UpdateCurrentDpiStage();
         SelectedDpiPreset = DpiPresets[0];
     }
     private async Task RefreshCurrentPerformanceAsync()
     {
+        reportedDpiSector = null;
+        reportedDpiIndex = null;
         if (performance is null) return;
         try
         {
             sensor = await performance.ReadAsync();
             var rate = SelectedDevice?.DeviceIndex != 0xFF ? sensor.WirelessRate : sensor.WiredRate;
             PerformanceSummary = $"当前 {sensor.CurrentX} × {sensor.CurrentY} DPI · {rate} Hz · 已读回确认";
-            SelectedDpiStage = DpiStages.FirstOrDefault(s => s.Enabled && ushort.TryParse(s.Value, out var x) && x == sensor.CurrentX && ushort.TryParse(s.LinkAxes ? s.Value : s.ValueY, out var y) && y == sensor.CurrentY);
+            UpdateCurrentDpiStage();
         }
         catch (Exception error) { PerformanceSummary = "板载已保存，实时性能读取失败：" + error.Message; Log(PerformanceSummary); }
     }
@@ -136,6 +143,8 @@ public partial class MainPageViewModel
     {
         if (performance is null || SelectedDpiStage is not { Enabled: true } stage) throw new InvalidOperationException("先读取设备并选择启用的 DPI 速度。");
         await performance.ApplyAsync(int.Parse(stage.Value), int.Parse(stage.LinkAxes ? stage.Value : stage.ValueY), int.Parse(SelectedLiveRate?.Id ?? "0"));
+        sensor = performance.State;
+        UpdateCurrentDpiStage();
         PerformanceSummary = $"当前 {performance.State!.CurrentX} × {performance.State.CurrentY} DPI · {SelectedLiveRate?.Label} · 已读回确认";
         StatusTitle = "性能设置已应用"; Status = "即时设置已生效。点击“预览并写入”可保存到当前板载配置。";
     });

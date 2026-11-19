@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using LogiBoardToolBox.Core.HidPlusPlus;
+using LogiBoardToolBox.Core.Lighting;
 using LogiBoardToolBox.Core.Macros;
 using LogiBoardToolBox.Core.Onboard;
 using XFEExtension.NetCore.XUnit.Assertions;
@@ -10,6 +11,51 @@ namespace LogiBoardToolBox.Test;
 [TestFixture]
 public class AdvancedProfileTests
 {
+    [Test]
+    public void Format7ActiveRgbUsesAdvertisedEffectsAndPreservesTheRestOfTheProfile()
+    {
+        var snapshot = Create();
+        var original = snapshot.Sectors[1];
+        original[252] = 0x10;
+        SectorChecksum.Seal(original);
+        var profile = snapshot.GetProfiles()[0];
+        var rgb = new LightsyncCapabilities([new(0, new Dictionary<int, byte> { [0] = 0, [1] = 1, [10] = 2, [3] = 3 })], []);
+        var preset = new LightingSettings { Color = new(182, 229, 244), Brightness = 57, Period = 3000 };
+        foreach (var (effect, bytes) in new[]
+        {
+            (LightingEffect.Fixed, "0167828B02000000000000"),
+            (LightingEffect.Cycle, "0300000000000BB8390000"),
+            (LightingEffect.Breathing, "0AB6E5F40BB80139000000"),
+            (LightingEffect.Off, "0000000000000000000000"),
+        })
+        {
+            var plan = MemoryWritePlan.Create(snapshot, profile, [], activeRgb: (rgb, preset with { Effect = effect }));
+            var expected = (byte[])original.Clone();
+            Convert.FromHexString(bytes).CopyTo(expected, 208);
+            var change = plan.Changes.Single();
+            Assert.Equal(1, change.Sector);
+            Assert.Equal(Convert.ToHexString(SectorChecksum.Seal(expected)), Convert.ToHexString(change.After));
+        }
+        Assert.Equal(Convert.ToHexString(original), Convert.ToHexString(profile.ToBytes()));
+    }
+
+    [Test]
+    public void Format7RejectsUnsupportedEffectsAndUnrelatedDraftChangesWithAnRgbEdit()
+    {
+        var snapshot = Create();
+        var profile = snapshot.GetProfiles()[0];
+        var fixedColor = new LightingSettings { Effect = LightingEffect.Fixed };
+        var device = new LightsyncCapabilities([new(0, new Dictionary<int, byte> { [1] = 1 })], []);
+        foreach (var incompatible in new[] { device with { FeatureId = 0x8070 }, device with { Clusters = [] },
+            device with { Clusters = [new(2, device.Clusters[0].Effects)] } })
+            Reject<NotSupportedException>(() => MemoryWritePlan.Create(snapshot, profile, [], activeRgb: (incompatible, fixedColor)));
+        Reject<NotSupportedException>(() => MemoryWritePlan.Create(snapshot, profile, [], activeRgb: (device, fixedColor with { Effect = LightingEffect.Breathing })));
+        var altered = profile.ToBytes();
+        altered[230] ^= 1;
+        var draft = new MouseProfile(1, profile.Enabled, SectorChecksum.Seal(altered), profileFormat: 7);
+        Reject<InvalidOperationException>(() => MemoryWritePlan.Create(snapshot, draft, [], activeRgb: (device, fixedColor)));
+    }
+
     [Test]
     public void CapturedFormat7ProfileDecodesAtItsActualOffsetsAndRetainsEveryByte()
     {
@@ -106,6 +152,37 @@ public class AdvancedProfileTests
         profile = snapshot.GetProfiles()[0]; profile.Dpis = [800, 1200, 1600, 2400, 3200]; profile.SetDpisY(caps, [800, 1200, 1600, 2400, 3300]);
         plan = MemoryWritePlan.Create(snapshot, profile, []); data = plan.Changes.Single(c => c.Sector == 1).After;
         Assert.Equal((byte)2, data[28]); Assert.Equal((ushort)3300, BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(26)));
+    }
+
+    [Test]
+    public void ZeroLodFormat7PreservesDeviceEncodingWhenEditingAndReenablingDpiStages()
+    {
+        var snapshot = Create();
+        snapshot.DeviceName = "G304 X LIGHTSPEED";
+        snapshot.Description[5] = 6;
+        var original = snapshot.Sectors[1];
+        // All enabled stages in the reported G304 X profile use LOD 0.
+        for (var index = 0; index < 5; index++) original[8 + 5 * index] = 0;
+        SectorChecksum.Seal(original);
+
+        var caps = snapshot.Capabilities;
+        var profile = snapshot.GetProfiles()[0];
+        profile.Dpis = [2600, 1200, 1600, 2400, 0];
+        profile.SetDpisY(caps, [2600, 1200, 1600, 2400, 0]);
+        var saved = MemoryWritePlan.Create(snapshot, profile, []).Changes.Single();
+        var expected = (byte[])original.Clone();
+        BinaryPrimitives.WriteUInt16LittleEndian(expected.AsSpan(4), 2600);
+        BinaryPrimitives.WriteUInt16LittleEndian(expected.AsSpan(6), 2600);
+        expected.AsSpan(24, 5).Clear();
+        Assert.Equal(Convert.ToHexString(SectorChecksum.Seal(expected)), Convert.ToHexString(saved.After));
+
+        snapshot.Sectors[1] = saved.After;
+        profile = snapshot.GetProfiles()[0];
+        profile.Dpis = [2600, 1200, 1600, 2400, 3200];
+        profile.SetDpisY(caps, [2600, 1200, 1600, 2400, 3200]);
+        saved = MemoryWritePlan.Create(snapshot, profile, []).Changes.Single();
+        original.AsSpan(24, 5).CopyTo(expected.AsSpan(24));
+        Assert.Equal(Convert.ToHexString(SectorChecksum.Seal(expected)), Convert.ToHexString(saved.After));
     }
 
     internal static MemorySnapshot Create()

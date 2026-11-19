@@ -29,7 +29,8 @@
       "滚轮向上"
     ],
     "LightingZoneCount": 8,
-    "ImageAspect": 0.5151851851851852
+    "ImageAspect": 0.5151851851851852,
+    "SideImageAsset": "/Assets/Devices/G502XPlus/side_black.png"
   },
   {
     "Id": "GPW",
@@ -131,19 +132,19 @@
     ],
     "ImageAsset": "/Assets/Devices/Catalog/G502Hero.png",
     "ImageAspect": 0.516,
-    "Layout": "Extended",
+    "Layout": "G502Classic",
     "ButtonNames": [
       "左键 · G1",
       "右键 · G2",
       "滚轮中键 · G3",
-      "按键 G4",
-      "按键 G5",
-      "按键 G6",
-      "按键 G7",
-      "按键 G8",
-      "按键 G9",
-      "按键 G10",
-      "按键 G11"
+      "后侧键 · G4",
+      "前侧键 · G5",
+      "DPI Shift 键 · G6",
+      "DPI − 键 · G7",
+      "DPI + 键 · G8",
+      "滚轮后方键 · G9",
+      "滚轮右倾",
+      "滚轮左倾"
     ],
     "LightingZoneCount": 2
   },
@@ -163,19 +164,19 @@
     ],
     "ImageAsset": "/Assets/Devices/Catalog/G502Wireless.png",
     "ImageAspect": 0.5149700598802395,
-    "Layout": "Extended",
+    "Layout": "G502Classic",
     "ButtonNames": [
       "左键 · G1",
       "右键 · G2",
       "滚轮中键 · G3",
-      "按键 G4",
-      "按键 G5",
-      "按键 G6",
-      "按键 G7",
-      "按键 G8",
-      "按键 G9",
-      "按键 G10",
-      "按键 G11"
+      "后侧键 · G4",
+      "前侧键 · G5",
+      "DPI Shift 键 · G6",
+      "DPI − 键 · G7",
+      "DPI + 键 · G8",
+      "滚轮后方键 · G9",
+      "滚轮右倾",
+      "滚轮左倾"
     ],
     "LightingZoneCount": 2
   },
@@ -407,7 +408,7 @@
   {
     "Id": "Pro2",
     "GHubModelId": "pro_2_wireless_mouse",
-    "SlotPrefix": "",
+    "SlotPrefix": "pro2wirelessmouse",
     "DisplayName": "PRO 2 LIGHTSPEED",
     "Aliases": [
       "PRO 2 LIGHTSPEED",
@@ -421,8 +422,8 @@
       49306,
       16552
     ],
-    "ImageAsset": "",
-    "ImageAspect": 0.516,
+    "ImageAsset": "/Assets/Devices/Catalog/Pro2.png",
+    "ImageAspect": 0.496,
     "Layout": "Ambidextrous",
     "ButtonNames": [
       "左键 · G1",
@@ -439,7 +440,7 @@
   {
     "Id": "Superlight2",
     "GHubModelId": "pro_x_2_wireless_mouse",
-    "SlotPrefix": "",
+    "SlotPrefix": "prox2wirelessmouse",
     "DisplayName": "PRO X SUPERLIGHT 2 / SE",
     "Aliases": [
       "PRO X SUPERLIGHT 2",
@@ -458,7 +459,7 @@
       49307,
       16553
     ],
-    "ImageAsset": "",
+    "ImageAsset": "/Assets/Devices/Catalog/Superlight2.png",
     "ImageAspect": 0.504,
     "Layout": "Compact",
     "ButtonNames": [
@@ -473,7 +474,7 @@
   {
     "Id": "Superlight2Dex",
     "GHubModelId": "pro_x_r_wireless_mouse",
-    "SlotPrefix": "",
+    "SlotPrefix": "proxrwirelessmouse",
     "DisplayName": "PRO X SUPERLIGHT 2 DEX",
     "Aliases": [
       "PRO X SUPERLIGHT 2 DEX",
@@ -485,8 +486,8 @@
       49312,
       16568
     ],
-    "ImageAsset": "",
-    "ImageAspect": 0.53,
+    "ImageAsset": "/Assets/Devices/Catalog/Superlight2Dex.png",
+    "ImageAspect": 0.5379426644182125,
     "Layout": "Compact",
     "ButtonNames": [
       "左键 · G1",

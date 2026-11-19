@@ -62,6 +62,41 @@ public class OnboardTests
     }
 
     [Test]
+    public async Task StandardDelaySeparatesSuccessiveOnboardClicks()
+    {
+        const string expected = "41000140003242000140003202FF";
+        var program = MacroCompiler.CompileProgram("mouse 1 down\nmouse 1 up", MacroRepeat.WhileHeld, standardDelay: 50);
+        var macro = program.ToOnboard();
+        Assert.Equal(expected, Convert.ToHexString(macro.Bytes));
+
+        var baseline = Fixture.Create(10);
+        using var fake = new FakeMouse(baseline);
+        using var client = new HidPlusPlusClient(fake, 1);
+        var memory = new OnboardMemory(client, baseline.DeviceIdentity, baseline.DeviceName);
+        var profile = baseline.GetProfiles()[0].Copy();
+        var plan = MemoryWritePlan.Create(baseline, profile, [new(5, false, macro)], true);
+        using var scratch = new ScratchDirectory();
+        await memory.CommitAsync(plan, scratch.Path);
+        var after = await memory.ReadAsync();
+        var binding = after.GetProfiles()[0].GetBinding(5);
+        var address = new MacroLocation(ButtonBinding.MacroSector(binding), ButtonBinding.MacroOffset(binding));
+        Assert.Equal(expected, Convert.ToHexString(MacroAllocator.ReadMacroBytes(after, address)));
+    }
+
+    [Test]
+    public void StandardDelayPreservesExplicitLoopGapsAndOneShotExit()
+    {
+        const string click = "mouse 1 down\nmouse 1 up";
+        string Compile(string script, MacroRepeat repeat = MacroRepeat.WhileHeld, ushort delay = 50)
+            => Convert.ToHexString(MacroCompiler.CompileProgram(script, repeat, standardDelay: delay).ToOnboard().Bytes);
+
+        Assert.Equal("410001400032420001FF", Compile(click, MacroRepeat.Once));
+        Assert.Equal("41000142000102FF", Compile(click, delay: 0));
+        Assert.Equal("41000140000A42000140001402FF", Compile("mouse 1 down\ndelay 10\nmouse 1 up\ndelay 20"));
+        Assert.Equal("40001441000140003242000102FF", Compile("delay 20\n" + click));
+    }
+
+    [Test]
     public void SequenceIsNotSilentlyConvertedToToggle()
         => Reject<NotSupportedException>(() => MacroCompiler.Compile("tap A", MacroRepeat.Sequence));
 

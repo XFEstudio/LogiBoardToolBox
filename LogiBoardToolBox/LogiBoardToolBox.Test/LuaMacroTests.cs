@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using LogiBoardToolBox.Core.HidPlusPlus;
 using LogiBoardToolBox.Core.Macros;
+using LogiBoardToolBox.Core.Onboard;
 using XFEExtension.NetCore.XUnit.Assertions;
 using XFEExtension.NetCore.XUnit.Attributes;
 
@@ -79,6 +81,112 @@ public class LuaMacroTests
         Assert.Equal("610000000440000B02FF", Convert.ToHexString(LuaMacroImport.ConvertToMacro(script).ToOnboard().Bytes));
         Assert.Equal(MacroRepeat.Toggle, LuaMacroImport.Convert(script, 1, MacroRepeat.Toggle).Repeat);
         Reject(() => LuaMacroImport.ConvertToMacro(script, 1, MacroRepeat.Toggle).ToOnboard());
+    }
+
+    [Test]
+    public async Task ContinuousLuaStoresOneIterationWithRecordedDelaysAndNormalFirmwareBinding()
+    {
+        const string source = """
+            local function click()
+              while (true) do
+                PressMouseButton(1)
+                Sleep(17)
+                ReleaseMouseButton(1)
+                Sleep(33)
+              end
+            end
+            function OnEvent(event, arg)
+              if event == "MOUSE_BUTTON_PRESSED" and arg == 4 then
+                click()
+                Sleep(1)
+              end
+            end
+            """;
+        var conversion = LuaMacroImport.Convert(source, 4);
+        Assert.Equal(MacroRepeat.Continuous, conversion.Repeat);
+        Assert.Equal("mouse 1 down\ndelay 17\nmouse 1 up\ndelay 33", conversion.Script);
+        var program = conversion.CompileProgram();
+        var macro = program.ToOnboard();
+        const string expected = "41000140001142000140002103FF";
+        Assert.Equal(expected, Convert.ToHexString(macro.Bytes));
+        var exported = LuaMacroExport.Export("循环", program, 4);
+        Assert.Equal(expected, Convert.ToHexString(LuaMacroImport.ConvertToMacro(exported, 4).ToOnboard().Bytes));
+
+        var baseline = Fixture.Create();
+        var draft = baseline.GetProfiles()[0];
+        draft.SetBinding(4, false, [0x20, 0, 0, 0]);
+        using var fake = new FakeMouse(baseline);
+        using var client = new HidPlusPlusClient(fake, 1);
+        using var scratch = new ScratchDirectory();
+        var memory = new OnboardMemory(client, baseline.DeviceIdentity, baseline.DeviceName);
+        await memory.CommitAsync(MemoryWritePlan.Create(baseline, draft, [new(3, false, macro)]), scratch.Path);
+        var after = await memory.ReadAsync();
+        var profile = after.GetProfiles()[0];
+        var binding = profile.GetBinding(3);
+        Assert.Equal(0, binding[0] >> 4);
+        Assert.Equal("停止所有宏", ButtonBinding.Describe(profile.GetBinding(4)));
+        var entry = new MacroLocation(ButtonBinding.MacroSector(binding), ButtonBinding.MacroOffset(binding));
+        Assert.Equal(expected, Convert.ToHexString(MacroAllocator.ReadMacroBytes(after, entry)));
+    }
+
+    [Test]
+    public void LuaRepeatUntilFalseLoopsNativelyAndFiniteBreakStillExecutesOnce()
+    {
+        const string script = """
+            function OnEvent(event, arg)
+              if event == "MOUSE_BUTTON_PRESSED" then
+                repeat Sleep(50) until (false)
+              end
+            end
+            """;
+        Assert.Equal("40003203FF", Convert.ToHexString(LuaMacroImport.ConvertToMacro(script).ToOnboard().Bytes));
+        Assert.Equal("40003202FF", Convert.ToHexString(LuaMacroImport.ConvertToMacro(script, 1, MacroRepeat.WhileHeld).ToOnboard().Bytes));
+        var finite = LuaMacroImport.Convert("function OnEvent(event,arg) if event=='MOUSE_BUTTON_PRESSED' then while true do Sleep(17) if arg == 1 then break end end end end");
+        Assert.Equal(MacroRepeat.Once, finite.Repeat);
+        Assert.Equal("delay 17", finite.Script);
+        Reject(() => LuaMacroImport.Convert("function OnEvent(event,arg) local n=0 while true do n=n+1 Sleep(n) end end"));
+        Reject(() => LuaMacroImport.Convert("function OnEvent(event,arg) Sleep(1) while true do Sleep(10) end end"));
+    }
+
+    [Test]
+    public void InfiniteLoopCannotFreezeStateCapturedThroughAShadowedLocal()
+    {
+        const string source = """
+            function OnEvent(event, arg)
+              if event == "MOUSE_BUTTON_PRESSED" then
+                local interval = 10
+                local function step()
+                  interval = interval + 1
+                  Sleep(interval)
+                end
+                do
+                  local interval = 50
+                  while true do step() end
+                end
+              end
+            end
+            """;
+        Reject(() => LuaMacroImport.Convert(source));
+    }
+
+    [Test]
+    public void LuaFiniteMacroBeyondTenThousandInstructionsUsesTheDeviceByteCapacity()
+    {
+        const string source = "function OnEvent(event,arg) if event=='MOUSE_BUTTON_PRESSED' then for i=1,10001 do MoveMouseWheel(1) end end end";
+        var program = LuaMacroImport.ConvertToMacro(source);
+        Assert.Equal(10001, program.InstructionCount);
+        var macro = program.ToOnboard();
+        Assert.Equal(20003, macro.Length);
+        var imported = LuaMacroImport.ConvertToMacro(LuaMacroExport.Export("长宏", program));
+        Assert.Equal(10001, imported.InstructionCount);
+        try { _ = MacroAllocator.Allocate(Fixture.Create(), [new(3, false, macro)]); }
+        catch (MacroCapacityException error)
+        {
+            Assert.Equal(macro.Length, error.RequiredProgramBytes);
+            Assert.Equal(true, error.AvailableStorageBytes < macro.Length);
+            return;
+        }
+        throw new Exception("Expected the fixture's actual flash capacity to reject this macro.");
     }
 
     [Test]

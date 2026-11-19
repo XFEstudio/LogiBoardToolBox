@@ -1,5 +1,7 @@
 namespace LogiBoardToolBox.Core.Onboard;
 
+public sealed class ImmediateSaveException(Exception cause) : IOException(cause.Message, cause);
+
 /// <summary>Coalesces an editing gesture, serializes commits, and never cancels a flash write midway.</summary>
 public sealed class ImmediateSaveQueue(Func<Task> save, TimeSpan? quietPeriod = null) : IAsyncDisposable
 {
@@ -45,7 +47,7 @@ public sealed class ImmediateSaveQueue(Func<Task> save, TimeSpan? quietPeriod = 
         {
             Task? current; Exception? error;
             lock (sync) { current = worker; error = failure; }
-            if (current is null) { if (error is not null) throw new IOException("板载自动保存未完成，更改仍在编辑器中。", error); return; }
+            if (current is null) { if (error is not null) throw new ImmediateSaveException(error); return; }
             await current;
         }
     }

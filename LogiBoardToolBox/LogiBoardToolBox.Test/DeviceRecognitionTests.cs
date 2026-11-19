@@ -64,9 +64,48 @@ public class DeviceRecognitionTests
         using var client = new HidPlusPlusClient(fake, 0xFF);
         Assert.Equal(true, await HidPlusPlusDeviceProbe.ProbeAsync(client, Hid(0xC547)) is null);
         Assert.Equal(true, MouseCatalog.BySlotPrefix("") is null);
-        try { GHubMacroImport.Read("{}", MouseCatalog.ById("Pro2")!.SlotPrefix); }
-        catch (NotSupportedException) { return; }
-        throw new Exception("An unverified G HUB namespace must not silently map another model's buttons.");
+        Assert.Equal("pro2wirelessmouse", MouseCatalog.ById("Pro2")!.SlotPrefix);
+        Assert.Equal("prox2wirelessmouse", MouseCatalog.ById("Superlight2")!.SlotPrefix);
+        Assert.Equal(true, MouseCatalog.BySlotPrefix("unverified-model-prefix") is null);
+    }
+
+    [Test]
+    public void G502GenerationsAndRegionalGpwNamesKeepDistinctIdentitiesAndArtwork()
+    {
+        foreach (var (pid, expected) in new (ushort, string)[]
+        {
+            (0xC07D,"G502Core"), (0xC332,"G502Spectrum"), (0xC08B,"G502Hero"), (0x407F,"G502Wireless"),
+            (0xC099,"G502X"), (0x409F,"G502XLightspeed"), (0x4099,"G502XPlus"), (0x40B2,"G502XMillennium"),
+            (0x40A8,"Pro2"), (0x40A9,"Superlight2"), (0x40B8,"Superlight2Dex"), (0x40B7,"Superlight2c")
+        })
+        {
+            var model = MouseCatalog.Resolve([pid], "Logitech Gaming Mouse");
+            Assert.Equal(expected, model.Id);
+            Assert.Equal(true, model.ImageAsset.StartsWith("/Assets/Devices/", StringComparison.Ordinal));
+        }
+        Assert.Equal("Superlight2", MouseCatalog.Resolve([], "GPW3").Id);
+        Assert.Equal("Pro2", MouseCatalog.Resolve([], "GPW4 朱雀").Id);
+        Assert.Equal("Superlight2c", MouseCatalog.Resolve([], "GPW4 小狗").Id);
+        // The vendor calls Core and Spectrum both G502. A name alone must not
+        // choose an arbitrary generation; their cable PIDs resolve them.
+        Assert.Equal(false, MouseCatalog.Resolve([0xC547], "G502").IsKnown);
+        Assert.Equal(false, MouseCatalog.Resolve([0xC07F], "G502").Id.StartsWith("G502", StringComparison.Ordinal));
+        Assert.Equal(false, MouseCatalog.ById("G502X")!.HasSideView);
+        Assert.Equal(true, MouseCatalog.ById("G502XPlus")!.HasSideView);
+    }
+
+    [Test]
+    public async Task IncompleteFirmwareIdentityKeepsThePhysicalMousePidWithoutUsingReceiverRoots()
+    {
+        using var fake = new IdentityTransport([0xBEEF], "Logitech Gaming Mouse", profiles: true);
+        using var client = new HidPlusPlusClient(fake, 0xFF);
+        var device = await HidPlusPlusDeviceProbe.ProbeAsync(client, Hid(0xC332));
+        Assert.Equal("G502Spectrum", device!.Model.Id);
+        Assert.Equal(true, device.TransportProductIds.Contains((ushort)0xBEEF));
+        Assert.Equal(true, device.TransportProductIds.Contains((ushort)0xC332));
+        Assert.Equal(false, MouseCatalog.Resolve([0xC547], "Unknown mouse").IsKnown);
+        Assert.Equal(43, MouseCatalog.Models.Count);
+        Assert.Equal(0, MouseCatalog.Models.Count(m => string.IsNullOrWhiteSpace(m.ImageAsset)));
     }
 
     private static HidDeviceInfo Hid(ushort pid) => new("fake-path", pid, "Logitech Receiver", "", 0xFF00, 1, 20, 20);

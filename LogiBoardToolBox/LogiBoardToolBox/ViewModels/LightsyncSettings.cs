@@ -28,6 +28,7 @@ public partial class LightingFrameEditor(int index, Rgb[] colors, int time) : Ob
     [ObservableProperty] public partial string Duration { get; set; } = "500";
     public override string ToString() => Name;
 }
+[WinRT.GeneratedBindableCustomProperty([nameof(SampleRegionEditor.Label)], [])]
 public partial class SampleRegionEditor(int index) : ObservableObject
 {
     public string Label => $"灯区 {index + 1}";
@@ -78,15 +79,29 @@ public partial class MainPageViewModel
     public bool IsAnimation => SelectedLightsyncMode.Id == "Animation";
     public bool IsScreenSampler => SelectedLightsyncMode.Id == "Preset" && SelectedLightsyncEffect.Id == "ScreenSampler";
     public bool IsAudioVisualizer => SelectedLightsyncMode.Id == "Preset" && SelectedLightsyncEffect.Id == "AudioVisualizer";
-    public string LightsyncStorageNote => BuildSimpleCanStore()
-        ? "当前预设可保存到所选板载配置，活动与空闲状态会一并更新。"
-        : "此效果由软件实时生成。自定义灯区/动画的 EEPROM 播放布局尚未验证；屏幕和音频联动需要电脑持续运行。板载保存不会替换成其他灯效。";
+    public string LightsyncStorageNote => !HasSnapshot ? "读取鼠标后显示可用的板载灯效。"
+        : !SupportsOnboardLighting ? "当前设备没有已适配的板载灯区。可在软件配置中应用灯效。"
+        : !CanStoreSelectedLightsyncPreset() ? "当前效果需要软件配置，已有板载灯效会保留。"
+        : snapshot?.Capabilities.UsesAdvancedProfile == true ? "当前预设可保存到所选板载配置，空闲灯效保持原值。"
+        : "当前预设可保存到所选板载配置，活动与空闲状态会一并更新。";
     public event EventHandler? LightsyncEdited;
-    private bool BuildSimpleCanStore() => HasRgbLighting && SelectedLightsyncMode.Id == "Preset" && (SelectedLightsyncEffect.Id is "Off" or "Fixed" or "Cycle" or "Breathing" || SelectedLightsyncEffect.Id == "Signature" && DeviceModel.Layout == "G502X");
+    private bool SupportsOnboardLighting => HasRgbLighting && snapshot?.Capabilities is { } caps &&
+        (caps.CanEditLighting || OnboardLighting.HasActiveRgbRecords(caps, lightingCapabilities));
+    private bool CanStoreSelectedLightsyncPreset() => IsPreset &&
+        Enum.TryParse<LightingEffect>(SelectedLightsyncEffect.Id, out var effect) &&
+        CanStoreLightsyncPreset(effect, (int)LightsyncBrightness);
+    private bool CanStoreLightsyncPreset(LightingEffect effect, int brightness)
+    {
+        if (!HasRgbLighting || snapshot?.Capabilities is not { } caps) return false;
+        return caps.UsesAdvancedProfile
+            ? OnboardLighting.CanStoreActiveRgbPreset(caps, lightingCapabilities, effect, brightness)
+            : caps.CanEditLighting && OnboardLighting.EffectId(effect) is not null &&
+                (effect != LightingEffect.Signature || DeviceModel.Layout == "G502X");
+    }
     private void LightsChanged()
     {
         if (loadingLights) return;
-        foreach (var name in new[] { nameof(IsFreestyle), nameof(IsAnimation), nameof(IsScreenSampler), nameof(IsNotScreenSampler), nameof(IsPreset), nameof(ShowLedSelectors), nameof(UsesPrimaryColor), nameof(UsesSpeed), nameof(UsesDirection), nameof(IsAudioVisualizer), nameof(LightsyncStorageNote) }) OnPropertyChanged(name);
+        foreach (var name in new[] { nameof(IsFreestyle), nameof(IsAnimation), nameof(IsScreenSampler), nameof(IsNotScreenSampler), nameof(IsPreset), nameof(ShowLedSelectors), nameof(UsesPrimaryColor), nameof(UsesSpeed), nameof(UsesDirection), nameof(IsAudioVisualizer), nameof(CanEditLighting), nameof(LightsyncStorageNote) }) OnPropertyChanged(name);
         LightsyncEdited?.Invoke(this, EventArgs.Empty);
     }
     partial void OnSelectedLightsyncModeChanged(EditorChoice value) => LightsChanged();
@@ -227,20 +242,23 @@ public partial class MainPageViewModel
         {
             if (SelectedProfile is null) throw new InvalidOperationException("请先选择板载配置。");
             var s = BuildLightsyncSettings();
-            if (!s.CanStoreProfile || !BuildSimpleCanStore()) throw new NotSupportedException(LightsyncStorageNote);
+            if (!s.CanStoreProfile || !CanStoreLightsyncPreset(s.Effect, s.Brightness)) throw new NotSupportedException(LightsyncStorageNote);
             stagedLights[SelectedProfile.Sector] = s;
             StagedLightingStatus = "板载灯效草稿：" + SelectedLightsyncEffect.Label;
-            StatusTitle = "灯效已加入板载草稿"; Status = "点击“预览并写入”保存到鼠标。";
+            if (IsEditingOnboard) RequestImmediateSave();
+            else { StatusTitle = "灯效已加入板载草稿"; Status = "点击“预览并写入”保存到鼠标。"; }
         }
         catch (Exception ex) { ShowError(ex); }
     }
-    private void ApplyLightsyncToProfile(MouseProfile profile)
+    private (LightsyncCapabilities Device, LightingSettings Preset)? PrepareLightsyncWrite(MouseProfile profile)
     {
-        if (!stagedLights.TryGetValue(profile.Sector, out var s)) return;
-        if (!HasRgbLighting || !snapshot!.Capabilities.CanEditLighting) throw new NotSupportedException("此设备没有可写的板载灯效。");
-        if (s.Effect == LightingEffect.Signature && DeviceModel.Layout != "G502X") throw new NotSupportedException("此型号没有 G502 X 的标志性板载灯效。");
-        var mode = (byte)(s.Effect switch { LightingEffect.Off => 0, LightingEffect.Fixed => 1, LightingEffect.Cycle => 3, LightingEffect.Breathing => 10, LightingEffect.Signature => 15, _ => throw new NotSupportedException("当前灯效不能编译为板载预设。") });
+        if (!stagedLights.TryGetValue(profile.Sector, out var s)) return null;
+        if (!s.CanStoreProfile || !CanStoreLightsyncPreset(s.Effect, s.Brightness))
+            throw new NotSupportedException("当前设备的板载灯区不支持此预设。");
+        if (snapshot!.Capabilities.UsesAdvancedProfile) return (lightingCapabilities!, s);
+        var mode = OnboardLighting.EffectId(s.Effect)!.Value;
         for (var slot = 0; slot < 4; slot++) profile.SetLighting(slot, OnboardLighting.Create(mode == 15 && slot >= 2 ? (byte)16 : mode, s.Color.R, s.Color.G, s.Color.B, (ushort)s.Period, (byte)s.Brightness));
+        return null;
     }
     partial void OnSelectedAnimationFrameChanged(LightingFrameEditor? value)
     {
