@@ -56,6 +56,17 @@ public partial class MainPageViewModel
         for (var f = 1; f <= 24; f++) yield return new($"F{f}", "keys", "key", $"F{f}", "功能键");
         foreach (var key in new[] { "Enter", "Space", "Tab", "Escape", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown", "Up", "Down", "Left", "Right", "Ctrl", "Shift", "Alt", "Win" })
             yield return new(key, "keys", "key", key, "键盘按键");
+        (string Label, string Key)[] symbols = [("-  减号 Minus", "Minus"), ("=  等号 Equal", "Equal"), ("[  左方括号 LeftBracket", "LeftBracket"), ("]  右方括号 RightBracket", "RightBracket"),
+            (@"\  反斜杠 Backslash", "Backslash"), (";  分号 Semicolon", "Semicolon"), ("'  引号 Quote", "Quote"), ("`  反引号 Grave", "Grave"),
+            (",  逗号 Comma", "Comma"), (".  句号 Period", "Period"), ("/  斜杠 Slash", "Slash")];
+        foreach (var item in symbols) yield return new(item.Label, "keys", "key", item.Key, "符号键");
+        foreach (var key in new[] { "CapsLock", "PrintScreen", "ScrollLock", "Pause", "NumLock", "Menu" })
+            yield return new(key, "keys", "key", key, "键盘按键");
+        for (var n = 0; n < 10; n++) yield return new($"Numpad{n}", "keys", "key", $"Numpad{n}", "小键盘");
+        foreach (var key in new[] { "NumpadAdd", "NumpadSubtract", "NumpadMultiply", "NumpadDivide", "NumpadDecimal", "NumpadEnter" })
+            yield return new(key, "keys", "key", key, "小键盘");
+        foreach (var key in new[] { "RightCtrl", "RightShift", "RightAlt", "RightWin" })
+            yield return new(key, "keys", "key", key, "修饰键");
         (string Name, string Action, string Value)[] mouse = [("左键点击", "mouse", "1"), ("右键点击", "mouse", "2"), ("中键点击", "mouse", "3"), ("后退", "mouse", "4"), ("前进", "mouse", "5"), ("向左滚动", "special", "tilt-left"), ("向右滚动", "special", "tilt-right"), ("向上滚动", "special", "scroll-up"), ("向下滚动", "special", "scroll-down"), ("DPI 增加", "special", "dpi-up"), ("DPI 减少", "special", "dpi-down"), ("DPI 循环", "special", "dpi-cycle"), ("默认 DPI", "special", "dpi-default"), ("DPI Shift", "special", "dpi-shift"), ("G-Shift", "special", "gshift"), ("板载配置文件循环", "special", "profile-cycle"), ("下一个配置", "special", "profile-next"), ("上一个配置", "special", "profile-prev"), ("电量显示", "special", "battery"), ("停止所有宏", "special", "macro-stop-all")];
         foreach (var item in mouse) yield return new(item.Name, "actions", item.Action, item.Value, "鼠标与板载功能");
         for (var i = 0; i < Macros.Count; i++)
